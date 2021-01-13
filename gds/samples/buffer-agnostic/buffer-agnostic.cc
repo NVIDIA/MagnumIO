@@ -55,13 +55,15 @@ void buffer_alloc(void **ptr, size_t size) {
   check_cudaruntimecall(cudaMalloc(ptr, size));
 
 #ifdef GDS_SUPPORT
+  CUfileError_t status;
+  int ret;
+
   std::cout << "registering device memory of size :" << size << std::endl;
   // registers device memory
   status = cuFileBufRegister(*ptr, size, 0);
   if (status.err != CU_FILE_SUCCESS) {
     ret = -1;
-    std::cerr << "buffer register failed:"
-      << cuFileGetErrorString(status) << std::endl;
+    printf("buffer register error: %d\n", status.err);
     exit(EXIT_FAILURE);
   }
 #else
@@ -72,13 +74,15 @@ void buffer_alloc(void **ptr, size_t size) {
 void buffer_free(void *ptr) {
 #ifdef GDS_SUPPORT
   std::cout << "deregistering device memory" << std::endl;
+  CUfileError_t status;
+  int ret;
 
   // deregister the device memory
   status = cuFileBufDeregister(ptr);
   if (status.err != CU_FILE_SUCCESS) {
     ret = -1;
-    std::cerr << "buffer deregister failed:"
-      << cuFileGetErrorString(status) << std::endl;
+    printf("buffer deregister error: %d\n", status.err);
+    exit(EXIT_FAILURE);
   }
 #endif
 
@@ -92,14 +96,9 @@ ssize_t buffer_write(file_desc_t file_handle, const void *buf, size_t count, off
     // writes device memory contents to a file
 #ifdef GDS_SUPPORT
     std::cout << "writing from device memory" << std::endl;
-    ret = cuFileWrite(file_handle.cf_handle, devPtr, size, 0, 0);
+    ret = cuFileWrite(file_handle.cf_handle, buf, count, 0, 0);
     if (ret < 0) {
-      if (IS_CUFILE_ERR(ret))
-        std::cerr << "write failed : "
-          << cuFileGetErrorString(ret) << std::endl;
-      else
-        std::cerr << "write failed : "
-          << cuFileGetErrorString(errno) << std::endl;
+      printf("write failed error: %ld\n", ret);
     } else {
       std::cout << "written bytes :" << ret << std::endl;
       ret = 0;
@@ -145,13 +144,16 @@ file_desc_t file_open(const char *filepath) {
   file_handle.fd = ret;
 
 #ifdef GDS_SUPPORT
+  CUfileError_t status;
+  CUfileDescr_t cf_descr;
+
   memset((void *)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = file_handle.fd;
   cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;
   status = cuFileHandleRegister(&file_handle.cf_handle, &cf_descr);
+
   if (status.err != CU_FILE_SUCCESS) {
-    std::cerr << "file register error:"
-      << cuFileGetErrorString(status) << std::endl;
+    printf("file register error: %d\n", status.err);
     close(file_handle.fd);
     file_handle.fd = -1;
     exit(EXIT_FAILURE);
@@ -171,7 +173,6 @@ int main(int argc, char *argv[]) {
 
 #ifdef GDS_SUPPORT
   CUfileError_t status;
-  CUfileDescr_t cf_descr;
 #endif
 
   if(argc < 3) {
@@ -189,9 +190,8 @@ int main(int argc, char *argv[]) {
 #ifdef GDS_SUPPORT
   status = cuFileDriverOpen();
   if (status.err != CU_FILE_SUCCESS) {
-    std::cerr << "cufile driver open error: "
-      << cuFileGetErrorString(status) << std::endl;
-    return -1;
+    printf("cufile driver open error: %d\n", status.err);
+    return EXIT_FAILURE;
   }
 #endif
 
@@ -228,9 +228,8 @@ int main(int argc, char *argv[]) {
 
   status = cuFileDriverClose();
   if (status.err != CU_FILE_SUCCESS) {
-    ret = -1;
-		std::cerr << "cufile driver close failed:"
-			<< cuFileGetErrorString(status) << std::endl;
+    printf("cufile driver close error: %d\n", status.err);
+    exit(EXIT_FAILURE);
 	}
 #else
 #endif
