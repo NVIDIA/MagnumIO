@@ -1,0 +1,6 @@
+To obtain source code for software provided under licenses
+that require redistribution of source code, including the
+GNU General Public License (GPL) and GNU Lesser General
+Public License (LGPL), contact oss-requests@nvidia.com.
+This offer is valid for a period of three (3) years from the
+date of the distribution of this product by NVIDIA CORPORATION.
