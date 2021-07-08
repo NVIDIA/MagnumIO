@@ -3,10 +3,10 @@
 # Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
 
 # Global Paramaters
-MAGNUM_IO_VERSION=21.04-dev
-MIN_DRIVER=460.32.03
-MIN_CUDA=11.0.228
-MIN_DOCKER=19.03.4
+MAGNUM_IO_VERSION=21.07-dev
+MIN_DRIVER=470.42
+MIN_CUDA=11.4.0
+MIN_DOCKER=20.10.3
 
 SCRIPT_NAME=$(basename $0)
 RUNFROM=$(dirname $(readlink -f $0))
@@ -105,7 +105,7 @@ EOF
     sudo add-apt-repository -y ppa:graphics-drivers/ppa
     sudo apt-get -y update
     sudo apt-get -y upgrade
-    sudo apt-get -y install nvidia-driver-455
+    sudo apt-get -y install nvidia-driver-470
     sudo apt-get -y autoremove
     REBOOT=1
   else
@@ -191,10 +191,10 @@ install_cuda () {
       sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
       sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/ /"
       sudo apt-get update
-      sudo apt-get -y install cuda-toolkit-11-0
+      sudo apt-get -y install cuda-toolkit-11-4
 
       echo "export PATH=/usr/local/cuda/bin/:\$PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
-      echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.0/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
+      echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
       source ${HOME}/.bashrc
     else
       curl https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-ubuntu2004.pin \
@@ -203,25 +203,25 @@ install_cuda () {
       sudo apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub
       sudo add-apt-repository "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/ /"
       sudo apt-get update
-      sudo apt-get -y install cuda-toolkit-11-0
+      sudo apt-get -y install cuda-toolkit-11-4
 
       echo "export PATH=/usr/local/cuda/bin/:\$PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
-      echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.0/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
+      echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
       source ${HOME}/.bashrc
     fi
   else
     if [ $OS_FLAVOR = "redhat7" ]; then
       sudo yum-config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-rhel7.repo
       sudo yum clean all
-      sudo yum install -y cuda-toolkit-11-0
+      sudo yum install -y cuda-toolkit-11-4
     else
       sudo dnf config-manager --add-repo http://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
       sudo dnf clean all
-      sudo dnf -y install cuda-toolkit-11-0
+      sudo dnf -y install cuda-toolkit-11-4
     fi
 
     echo "export PATH=/usr/local/cuda/bin/:\$PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
-    echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.0/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
+    echo "export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/lib:\$LD_LIBRARY_PATH # MAGNUMIO-DEV-ENV-ADDED" >> ${HOME}/.bashrc
     source ${HOME}/.bashrc
   fi
   set +e
@@ -556,9 +556,12 @@ case "$1" in
     ;;
 
   build-dockerfile)
-    nvlog "To rebuild Dockerfile, currently need top-of-tree version of HPC Container Maker (HPCCM)"
-    nvlog "Clonable from https://github.com/NVIDIA/hpc-container-maker"
-    ~/hpc-container-maker/hpccm.sh --recipe magnum-io-hpccm.py --format docker > magnum-io.Dockerfile
+    nvlog "To rebuild Dockerfile, HPC Container Maker (HPCCM) is used"
+    nvlog "Installable with \"pip install hpccm\" or from https://github.com/NVIDIA/hpc-container-maker"
+    hpccm --recipe magnum-io-hpccm.py --format docker > magnum-io.Dockerfile
+    # Next line is a hack until HPCCM is updated with new NVSHMEM naming
+    sed -i 's/nvshmem_src_2.2.1-0.txz/nvshmem_2.2.1.txz/g' magnum-io.Dockerfile
+    nvlog "Finished Dockerfile rebuild"
     ;;
   build-container)
     build_container
