@@ -581,6 +581,7 @@ case "$1" in
     docker run --gpus all --rm -it \
       --user $(id -u):$(id -g) \
       --volume $HOME:$HOME \
+      --volume /run/udev:/run/udev:ro \
       --workdir $HOME \
       magnum-io:${MAGNUM_IO_VERSION}
    ;;
