@@ -91,6 +91,22 @@ ENV CPATH=/usr/local/nvshmem/include:$CPATH \
     LIBRARY_PATH=/usr/local/nvshmem/lib:$LIBRARY_PATH \
     PATH=/usr/local/nvshmem/bin:$PATH
 
+# NCCL 2.10.3-1
+RUN apt-get update -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        apt-transport-https \
+        ca-certificates \
+        gnupg \
+        wget && \
+    rm -rf /var/lib/apt/lists/*
+RUN wget -qO - https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64 /" >> /etc/apt/sources.list.d/hpccm.list && \
+    apt-get update -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libnccl-dev=2.10.3-1+cuda11.4 \
+        libnccl2=2.10.3-1+cuda11.4 && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY magnum-io.Dockerfile \
     third_party.txt \
     README.md \
