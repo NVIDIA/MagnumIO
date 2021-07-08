@@ -107,6 +107,11 @@ RUN wget -qO - https://developer.download.nvidia.com/compute/machine-learning/re
         libnccl2=2.10.3-1+cuda11.4 && \
     rm -rf /var/lib/apt/lists/*
 
+RUN apt-get update -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        cuda-tools-11-4 && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY magnum-io.Dockerfile \
     third_party.txt \
     README.md \

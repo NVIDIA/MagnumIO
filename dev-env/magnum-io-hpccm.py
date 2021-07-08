@@ -14,6 +14,8 @@ Stage0 += ucx(version='1.10.1', cuda=True,
 Stage0 += nvshmem(version='2.2.1') # See hack in instaler.sh for 2.2.1 artifact renaming
 Stage0 += nccl(cuda='11.4', version='2.10.3-1')
 
+Stage0 += apt_get(ospackages=['cuda-tools-11-4'])
+
 Stage0 += copy(src=['magnum-io.Dockerfile', 'third_party.txt', 'README.md'], dest='/')
 
 Stage0 += environment(variables={'MAGNUM_IO_VERSION': '21.07'})
