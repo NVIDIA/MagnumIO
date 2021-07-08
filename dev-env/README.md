@@ -61,10 +61,11 @@ docker pull nvcr.io/nvidia/magnum-io/magnum-io:TAG
 4. Run
 
 ```bash
-docker run --gpus all --rm -it
-  --user "$(id -u):$(id -g)"
-  --volume $HOME:$HOME
-  --workdir $HOME
+docker run --gpus all --rm -it \
+  --user "$(id -u):$(id -g)" \
+  --volume $HOME:$HOME \
+  --volume /run/udev:/run/udev:ro \
+  --workdir $HOME \
   magnum-io:TAG
 ```
 
