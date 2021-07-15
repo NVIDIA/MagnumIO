@@ -559,8 +559,6 @@ case "$1" in
     nvlog "To rebuild Dockerfile, HPC Container Maker (HPCCM) is used"
     nvlog "Installable with \"pip install hpccm\" or from https://github.com/NVIDIA/hpc-container-maker"
     hpccm --recipe magnum-io-hpccm.py --format docker > magnum-io.Dockerfile
-    # Next line is a hack until HPCCM is updated with new NVSHMEM naming
-    sed -i 's/nvshmem_src_2.2.1-0.txz/nvshmem_2.2.1.txz/g' magnum-io.Dockerfile
     nvlog "Finished Dockerfile rebuild"
     ;;
   build-container)

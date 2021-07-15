@@ -82,11 +82,11 @@ RUN apt-get update -y && \
         make \
         wget && \
     rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://developer.download.nvidia.com/compute/redist/nvshmem/2.2.1/source/nvshmem_2.2.1.txz && \
-    mkdir -p /var/tmp && tar -x -f /var/tmp/nvshmem_2.2.1.txz -C /var/tmp -J && \
+RUN mkdir -p /var/tmp && wget -q -nc --no-check-certificate -P /var/tmp https://developer.download.nvidia.com/compute/redist/nvshmem/2.2.1/source/nvshmem_src_2.2.1-0.txz && \
+    mkdir -p /var/tmp && tar -x -f /var/tmp/nvshmem_src_2.2.1-0.txz -C /var/tmp -J && \
     cd /var/tmp/nvshmem_src_2.2.1-0 && \
     CUDA_HOME=/usr/local/cuda NVSHMEM_MPI_SUPPORT=0 NVSHMEM_PREFIX=/usr/local/nvshmem make -j$(nproc) install && \
-    rm -rf /var/tmp/nvshmem_src_2.2.1-0 /var/tmp/nvshmem_2.2.1.txz
+    rm -rf /var/tmp/nvshmem_src_2.2.1-0 /var/tmp/nvshmem_src_2.2.1-0.txz
 ENV CPATH=/usr/local/nvshmem/include:$CPATH \
     LIBRARY_PATH=/usr/local/nvshmem/lib:$LIBRARY_PATH \
     PATH=/usr/local/nvshmem/bin:$PATH
