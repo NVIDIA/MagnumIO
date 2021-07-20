@@ -3,7 +3,7 @@
 # Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
 
 # Global Paramaters
-MAGNUM_IO_VERSION=21.07-dev
+MAGNUM_IO_VERSION=21.07
 MIN_DRIVER=470.42
 MIN_CUDA=11.4.0
 MIN_DOCKER=20.10.3
