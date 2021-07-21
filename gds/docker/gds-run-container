@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+MOFED=0
+GDS=0
+DOCKER_OPTIONS=()
+CMD=""
+if [ $# -eq 0 ] ; then
+        CMD=help
+else
+        while [[ $# -gt 0 ]]; do
+          opt="$1"
+
+          case $opt in
+            run)
+              CMD="$1"
+              shift
+              ;;
+            --enable-mofed)
+              MOFED="1"
+              shift
+              ;;
+            --enable-gds)
+              GDS="1"
+              shift 
+              ;;
+            --enable-gds-compat)
+              GDS_COMPAT="1"
+              shift 
+              ;;
+            -h | --help | help)
+              CMD="help"
+              DOCKER_OPTIONS+=" $1"
+              shift 
+              ;;
+
+            *) # unknown option
+              DOCKER_OPTIONS+=" $1"
+              shift 
+              ;;
+          esac
+        done
+fi
+
+if [ "x$MOFED" = "x1" ]; then
+	uverbs=$(ls /dev/infiniband/uverbs* 2>&1)
+	if [ $? -eq 0 ] ; then
+		UVERB_DEPS=" --net host --cap-add=IPC_LOCK --device=/dev/infiniband/rdma_cm " 
+		for dev in $uverbs
+		do
+			UVERB_DEVS="${UVERB_DEVS} --device=$dev"
+		done
+		MOFED_OPTS="${UVERB_DEPS} ${UVERB_DEVS}"
+	fi
+fi
+
+if [ "x$GDS" = "x1" ] ; then
+	nvfs_devs=$(ls /dev/nvidia-fs* 2>&1)
+	if [ $? -eq 0 ] ; then
+		NVFS_DEPS=" --ipc host  --volume /run/udev:/run/udev:ro "
+		for dev in ${nvfs_devs}
+		do
+			NVFS_DEVS="${NVFS_DEVS} --device=$dev"
+		done
+	else
+		echo "skipping nvidia_fs kernel module load"
+		exit
+	fi
+	GDS_OPTS="${NVFS_DEPS} ${NVFS_DEVS}"
+elif [ "x$GDS_COMPAT" = "x1" ] ; then
+	NVFS_DEPS=" --ipc host  --volume /run/udev:/run/udev:ro "
+	GDS_OPTS="${NVFS_DEPS}"
+fi
+
+
+if [ "$CMD" = "run" ] ;then
+	echo exec docker " run ${GDS_OPTS} ${MOFED_OPTS} ${DOCKER_OPTIONS}"
+	exec docker run ${GDS_OPTS} ${MOFED_OPTS} ${DOCKER_OPTIONS}
+elif [ "$CMD" = "help" ] ; then
+     
+      echo "Note: "`basename $0`" is a wrapper script around docker to provide GDS specific flags and device(s)"
+      echo
+      echo "GPUDirect Storage Options:"
+      echo " 	--enable-gds         pass nvidia_fs character device(s) and flags"
+      echo " 	--enable-gds-compat  allow for GDS to work in compat mode only" 
+      echo " 	--enable-mofed pass  mellanox character device(s) and flags"
+      echo
+      docker ${DOCKER_OPTIONS}
+else
+	exec docker ${DOCKER_OPTIONS}
+fi
