@@ -1,0 +1,5 @@
+
+
+[submodule "gds/readers/hdf5-gds-vfd"]
+	path = gds/readers/hdf5-gds-vfd
+	url = https://github.com/hpc-io/vfd-gds.git
