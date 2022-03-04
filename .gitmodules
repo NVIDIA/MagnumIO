@@ -1,3 +1,3 @@
 [submodule "gds/readers/zarr-python/kvikio"]
-	path = gds/readers/zarr-python/kvikio
+	path = gds/readers/zarr/kvikio
 	url = https://github.com/rapidsai/kvikio
