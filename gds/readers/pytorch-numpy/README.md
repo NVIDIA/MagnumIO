@@ -4,7 +4,7 @@ This repository provides a GDS implementation for reading NumPy files as PyTorch
 
 ## Installation
 Make sure that you have PyTorch >= 1.6 installed in your Python environment. Then clone this repo into any path and execute `python setup.py install`.
-CUDA 10.2 or newer as well as GDS has to be available and the cufile lobraries as well as the headers have to be in system search locations.
+CUDA 10.2 or newer as well as GDS has to be available and the cufile libraries as well as the headers have to be in system search locations.
 
 ## Usage
 The file `python/example.py` contains an example implementation of how to use this reader inside a PyTorch Dataset object. 
