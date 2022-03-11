@@ -1,3 +1,6 @@
 [submodule "gds/readers/zarr-python/kvikio"]
 	path = gds/readers/zarr/kvikio
 	url = https://github.com/rapidsai/kvikio
+[submodule "gds/readers/cucim-gds/cucim"]
+	path = gds/readers/cucim-gds/cucim
+	url = https://github.com/rapidsai/cucim.git
