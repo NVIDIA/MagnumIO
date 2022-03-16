@@ -1,8 +1,15 @@
 # cuCIM's GDS API
 
+[cuCIM](https://github.com/rapidsai/cucim)(cuClaraIMage) is a toolkit under [RAPIDS](https://rapids.ai/) to provide GPU accelerated I/O, image processing & computer vision primitives for N-dimensional images with a focus on biomedical imaging.
+It provides [OpenSlide](https://openslide.org/api/python/)-like and [scikit-image](https://scikit-image.org/)-compatible APIs.
+
 This repository provides a GDS implementation for reading files with cuCIM's GDS API.
 
 With cuCIM, you can work with CuPy array or PyTorch's Tensor objects.
+
+Reading JPEG-compressed TIFF image with GDS+nvJPEG is [available](https://github.com/rapidsai/cucim/wiki/release_notes_v22.02.00#2-supporting-multithreading-and-batch-processing) to bypass CPU and accelerate processing.
+
+Applying GDS to read other image formats (used in CT/MRI/Microscopy images) is also planned.
 
 ## GDS installation
 
