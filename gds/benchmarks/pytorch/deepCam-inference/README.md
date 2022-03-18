@@ -81,4 +81,4 @@ cuDNN: 8.3.0
 DALI: 1.12.0dev.20220304
 Torch-TensorRT: 1.1.0a0+00da3d1f
 
-The Dockerfile from the `pytorch/docker` already uses these versions.
+The Dockerfile from the `pytorch/docker` already uses these versions. Concerning DALI, any version newer than the one stated is also supposed to work.
