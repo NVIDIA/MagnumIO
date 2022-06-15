@@ -16,7 +16,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/types.h>
-#include <assert.h>
 
 // CUDA includes
 #include <cuda.h>
@@ -36,6 +35,7 @@
 
 #define ALIGN_UP(x, align_to)   (((x) + ((align_to)-1)) & ~((align_to)-1))
 #define ALIGN_DOWN(x, a)        ((unsigned long)(x) & ~(((unsigned long)(a)) - 1))
+#define MAX_RETRY 3
 
 //Macro for checking cuda errors following a cuda launch or api call
 #define cudaCheckError() {                                          \
@@ -59,6 +59,7 @@ static void *read_thread_fn(void *data)
 {
 	int ret;
 	thread_data_t *t = (thread_data_t *)data;
+	int cnt;
 
 	cudaSetDevice(0);
 	cudaCheckError();
@@ -72,18 +73,31 @@ static void *read_thread_fn(void *data)
 	fl.l_len = ALIGN_UP(t->size, PAGE_SIZE);
 	
 	// Acquire lock at 4K boundary
-	if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
-		printf("Failed to acquire read lock from offset %ld size %ld errno %d\n",
-				(unsigned long) fl.l_start, (unsigned long) fl.l_len, errno);
-		exit(1);
-	}
+        cnt = 0;
+        while (1) {
+                cnt++;
+                if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
+                        printf("Failed to acquire read lock from offset %ld size %ld errno %d\n",
+                                (unsigned long) fl.l_start, (unsigned long) fl.l_len, errno);
+                        if (cnt == MAX_RETRY) {
+                                exit(1);
+                        } else {
+                                printf("Retrying fcntl for read..\n");
+                        }
+                } else {
+                        break;
+                }
+        }
 
         printf("Read lock acquired from offset %ld size %ld. Submit read at offset %ld size %ld\n",
                         (unsigned long) fl.l_start, (unsigned long) fl.l_len,
                         (unsigned long) t->offset, (unsigned long) t->size);
 
 	ret = cuFileRead(t->cfr_handle, t->devPtr, t->size, t->offset, 0);
-	assert(ret > 0);
+	if (ret < 0) {
+		perror("cuFileRead Failed");
+		exit(1);
+	}
 
 	fl.l_type = F_UNLCK;  /* set to unlock same region */
 	if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
@@ -101,6 +115,7 @@ static void *write_thread_fn(void *data)
 {
 	int ret;
 	thread_data_t *t = (thread_data_t *)data;
+	int cnt;
 
 	/*
 	 * We need to set the CUDA device; threads will not inherit main thread's
@@ -120,19 +135,31 @@ static void *write_thread_fn(void *data)
 	// Acquire lock at 4K boundary
 	fl.l_start = ALIGN_DOWN(t->offset, PAGE_SIZE);
 	fl.l_len = ALIGN_UP(t->size, PAGE_SIZE);
+        cnt = 0;
+        while (1) {
+                cnt++;
+                if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
+                        printf("Failed to acquire write lock from offset %ld size %ld errno %d\n",
+                                (unsigned long) fl.l_start, (unsigned long) fl.l_len, errno);
+                        if (cnt == MAX_RETRY) {
+                                exit(1);
+                        } else {
+                                printf("Retrying fcntl for write..\n");
+                        }
+                } else {
+                        break;
+                }
+        }
 	
-	if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
-		printf("Failed to acquire write lock from offset %ld size %ld errno %d\n",
-				(unsigned long) fl.l_start, (unsigned long) fl.l_len, errno);
-		exit(1);
-	}
-
 	printf("Write lock acquired from offset %ld size %ld. Submit write at offset %ld size %ld\n",
 			(unsigned long) fl.l_start, (unsigned long) fl.l_len,
 			(unsigned long) t->offset, (unsigned long) t->size);
 
 	ret = cuFileWrite(t->cfr_handle, t->devPtr, t->size, t->offset, 0);
-	assert(ret > 0);
+	if (ret < 0) {
+		perror("cuFileWrite Failed");
+		exit(1);
+	}
 
 	fl.l_type = F_UNLCK;  /* set to unlock same region */
 	if (fcntl(t->fd, F_SETLKW, &fl) == -1) {
@@ -192,6 +219,9 @@ int main(int argc, char **argv) {
 	cudaCheckError();
 
 	cudaMemset(devPtr, 0xab, KB(4));
+	cudaCheckError();
+
+	cudaStreamSynchronize(0);
 	cudaCheckError();
 
 	// Thread 0 will write to file from offset 10 - write size 100 bytes

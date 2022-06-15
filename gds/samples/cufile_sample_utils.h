@@ -136,10 +136,8 @@ bool LoadSHA256Symbols()
 	}
 
 	if(SHA256_lib_handle == NULL) {
-		printf("Unable to load libcrypto library.\n"); 
-                printf("Please install %s or %s depending on your platform\n",
-                        GDSTOOLS_CRYPTO_LIB_A,
-                        GDSTOOLS_CRYPTO_LIB_B);
+		std::cout << "Unable to load libcrypto library." << std::endl; 
+		std::cout << "Please install" << GDSTOOLS_CRYPTO_LIB_A << " or " << GDSTOOLS_CRYPTO_LIB_B << "depending on your platform " << std::endl;
                 return false;
 	}
 
@@ -160,7 +158,7 @@ load_sha256_symbols:
         }
         return true;
 error:
-	printf("Unable to load SHA256 symbols\n");
+	std::cout << "Unable to load SHA256 symbols" << std::endl;
         dlclose(SHA256_lib_handle);
         SHA256_lib_handle = NULL;
         SHA256_Init_p = NULL;

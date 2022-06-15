@@ -125,7 +125,7 @@ int main(int argc, char *argv[]) {
 	check_cudaruntimecall(cudaMalloc(&devPtr, size));
 	// special case for holes
 	check_cudaruntimecall(cudaMemset(devPtr, 0, size));
-
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 	std::cout << "reading file to device memory :" << TEST_READWRITEFILE
 				<< std::endl;
 

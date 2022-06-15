@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
 	size = std::min(size, MAX_BUFFER_SIZE);
 	check_cudaruntimecall(cudaMalloc(&devPtr, size));
 	check_cudaruntimecall(cudaMemset((void*)(devPtr), 0x00, size));
-
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 	std::cout << "registering device memory of size :" << size << std::endl;
 	status = cuFileBufRegister(devPtr, size, 0);
 	if (status.err != CU_FILE_SUCCESS) {

@@ -83,7 +83,7 @@ int main(int argc, char *argv[]) {
 
 	// filler for device memory
 	check_cudaruntimecall(cudaMemset(devPtr, 0xab, size));
-
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 	check_cudaruntimecall(cudaGetDevice(&idx));
 
 	std::cout << "writing from gpuid: " << idx << std::endl;

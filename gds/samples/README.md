@@ -128,3 +128,24 @@ buffer offsets of a memory allocated using single allocation and single buffer r
 ``` bash
 ./cufile_sample_018 <file-path>
 ```
+
+**Note**: Following samples need cuFile library version 11.6 and above 
+**cufile_sample_019**: This sample shows the usage of cuFile Batch API for writes.
+``` bash
+./cufile_sample_019 <file-path> <gpuid> <num batch entries>
+```
+
+**cufile_sample_020**: This sample shows the usage of cuFile Batch API for reads.
+``` bash
+./cufile_sample_020 <file-path>  <gpuid> <num batch entries>
+```
+
+**cufile_sample_021**: This sample shows the usage of cuFile Batch API to cancel I/O after submitting a batch read.
+``` bash
+./cufile_sample_021 <file-path>  <gpuid> <num batch entries>
+```
+
+**cufile_sample_022**: This sample shows the usage of cuFile Batch API to perform cuFileBatchIOGetStatus after submitting a batch read.
+``` bash
+./cufile_sample_022 <file-path>  <gpuid> <num batch entries>
+```
