@@ -129,7 +129,8 @@ buffer offsets of a memory allocated using single allocation and single buffer r
 ./cufile_sample_018 <file-path>
 ```
 
-**Note**: Following samples need cuFile library version 11.6 and above 
+**Note**: Following samples need cuFile library version 11.6 and above. 
+
 **cufile_sample_019**: This sample shows the usage of cuFile Batch API for writes.
 ``` bash
 ./cufile_sample_019 <file-path> <gpuid> <num batch entries>
