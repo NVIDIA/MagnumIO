@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
 
 	check_cudaruntimecall(cudaMalloc(&devPtr, size));
 	check_cudaruntimecall(cudaMemset(devPtr, 0x00, size));
-
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 	std::cout << "reading file sequentially :" << TESTFILE
 			  << " chunk size : " << CHUNK_SIZE <<  std::endl;
 	do {

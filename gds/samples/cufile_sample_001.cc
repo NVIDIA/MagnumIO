@@ -87,6 +87,7 @@ int main(int argc, char *argv[]) {
 	check_cudaruntimecall(cudaMalloc(&devPtr, size));
 	// filler
 	check_cudaruntimecall(cudaMemset((void*)(devPtr), 0xab, size));
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 
 	std::cout << "registering device memory of size :" << size << std::endl;
 	// registers device memory

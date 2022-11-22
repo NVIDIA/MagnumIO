@@ -164,6 +164,7 @@ int main(int argc, char *argv[]) {
     assert((devPtr = alloc_memory(size, mem_type)) != nullptr);
     // special case for holes
     assert(cudaMemset(devPtr, 0, size) == cudaSuccess);
+    check_cudaruntimecall(cudaStreamSynchronize(0));
 
     std::cout << "reading file to device memory :" << TEST_READWRITEFILE
         << std::endl;
