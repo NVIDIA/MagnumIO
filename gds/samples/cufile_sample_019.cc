@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 	int fd[MAX_BATCH_IOS];
 	ssize_t ret = 0;
 	void *devPtr[MAX_BATCH_IOS];
-	const size_t size = MAX_BUFFER_SIZE;
+	const size_t size = 3000; //MAX_BUFFER_SIZE;
 	CUfileError_t status;
 	const char *TESTFILE;
 	CUfileDescr_t cf_descr[MAX_BATCH_IOS];

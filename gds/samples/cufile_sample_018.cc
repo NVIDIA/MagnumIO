@@ -96,6 +96,7 @@ static void *read_thread_fn(void *data)
 	ret = cuFileRead(t->cfr_handle, t->devPtr, t->size, t->offset, 0);
 	if (ret < 0) {
 		perror("cuFileRead Failed");
+		printf("cuFileRead returned %d\n", ret);
 		exit(1);
 	}
 
@@ -158,6 +159,7 @@ static void *write_thread_fn(void *data)
 	ret = cuFileWrite(t->cfr_handle, t->devPtr, t->size, t->offset, 0);
 	if (ret < 0) {
 		perror("cuFileWrite Failed");
+		printf("cuFileWrite returned %d\n", ret);
 		exit(1);
 	}
 
@@ -223,7 +225,7 @@ int main(int argc, char **argv) {
 
 	cudaStreamSynchronize(0);
 	cudaCheckError();
-
+	
 	// Thread 0 will write to file from offset 10 - write size 100 bytes
 	// This is an unaligned write as offset is not 4K aligned. GDS will
 	// convert this write to Read-Modify-Write

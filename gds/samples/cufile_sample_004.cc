@@ -141,7 +141,7 @@ int main(int argc, char *argv[]) {
 	check_cudadrivercall(cuMemAlloc(&cudevPtr, size));
 	check_cudadrivercall(cuMemsetD8(cudevPtr, 0x0, size));
 	check_cudadrivercall(cuStreamSynchronize(0));
-
+	
 	std::cout << "reading file to device memory :"
 		<< TEST_READWRITEFILE << std::endl;
 

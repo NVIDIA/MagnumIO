@@ -23,7 +23,7 @@ cd gds/samples
 
 **Note**: Assuming the path to GDS package is /usr/local/cuda-11.4/gds
 ``` bash
-export CUFILE_PATH=/usr/local/cuda-11.4/targets/x86_64-linux/lib/
+export CUFILE_PATH=/usr/local/cuda/targets/x86_64-linux/lib/
 make
 ```
 
@@ -149,4 +149,29 @@ buffer offsets of a memory allocated using single allocation and single buffer r
 **cufile_sample_022**: This sample shows the usage of cuFile Batch API to perform cuFileBatchIOGetStatus after submitting a batch read.
 ``` bash
 ./cufile_sample_022 <file-path>  <gpuid> <num batch entries>
+```
+
+**cufile_sample_023**: This sample shows the usage of cuFile API with simple cuMemMap allocations.
+``` bash
+./cufile_sample_023  <filepathA> <filepathB>
+```
+
+**cufile_sample_024**: This sample shows the usage of cuFile API with simple cuMemMap allocations and Thrust.
+``` bash
+./cufile_sample_024 <file-path> 
+
+```
+**cufile_sample_025**: This sample shows the usage of cuFile API with simple cuMemMap allocations with resize operation.
+``` bash
+./cufile_sample_025  <filepathA> <filepathB>
+
+```
+**cufile_sample_026**: This sample shows the usage of cuFile API with simple cuMemMap allocations with multiple resize operations.
+``` bash
+./cufile_sample_026  <filepathA> <filepathB>
+```
+
+**cufile_sample_027**: This sample shows the usage of cuFile Batch API for unaligned writes.
+``` bash
+./cufile_sample_027 <file-path> <gpuid> <num batch entries>
 ```

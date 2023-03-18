@@ -21,7 +21,9 @@
 #include <stdexcept>
 
 #include <sys/stat.h>
+
 #include <openssl/sha.h>
+#include <openssl/evp.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -108,102 +110,210 @@ std::string cuFileGetErrorString(T status) {
 		errStr.append(".").append(GetCuErrorString(status.cu_err));
 	return errStr;
 }
-
 #define GDSTOOLS_CRYPTO_LIB_A "libcrypto.so.1.1"
 #define GDSTOOLS_CRYPTO_LIB_B "libcrypto.so.10"
-
+#define GDSTOOLS_CRYPTO_LIB_C "libssl.so.3"
 bool LoadMD5Symbols();
 void UnLoSHA256Symbols();
-typedef int (*SHA256_Init_func) (SHA256_CTX *c);
-typedef int (*SHA256_Update_func) (SHA256_CTX *c, const void *data, size_t len);
-typedef int (*SHA256_Final_func) (unsigned char *md, SHA256_CTX *c);
+
+bool ssl_lib_v3 = false;
+
+typedef int (*SHA256_Init_func_v1) (SHA256_CTX *c);
+typedef int (*SHA256_Update_func_v1) (SHA256_CTX *c, const void *data, size_t len);
+typedef int (*SHA256_Final_func_v1) (unsigned char *md, SHA256_CTX *c);
+typedef int (*SHA256_Init_func_v3) (EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl);
+typedef int (*SHA256_Update_func_v3) (EVP_MD_CTX *ctx, const void *d, size_t cnt);
+typedef int (*SHA256_Final_func_v3) (EVP_MD_CTX *ctx, unsigned char *md, unsigned int *s);
+typedef EVP_MD_CTX *(*SHA256_Mdctx_create_func)();
+typedef void (*SHA256_Mdctx_destroy_func)(EVP_MD_CTX *c);
+typedef EVP_MD *(*SHA256_get_digestbyname_func)(const char *name);
 
 static void *SHA256_lib_handle = NULL;
-static SHA256_Init_func SHA256_Init_p = NULL;
-static SHA256_Update_func SHA256_Update_p = NULL;
-static SHA256_Final_func SHA256_Final_p = NULL;
+static SHA256_Init_func_v1 SHA256_Init_v1_p = NULL;
+static SHA256_Update_func_v1 SHA256_Update_v1_p = NULL;
+static SHA256_Final_func_v1 SHA256_Final_v1_p = NULL;
+static SHA256_Init_func_v3 SHA256_Init_v3_p = NULL;
+static SHA256_Update_func_v3 SHA256_Update_v3_p = NULL;
+static SHA256_Final_func_v3 SHA256_Final_v3_p = NULL;
+
+static SHA256_Mdctx_create_func SHA256_Mdctx_create_p = NULL;
+static SHA256_Mdctx_destroy_func SHA256_Mdctx_destroy_p = NULL;
+static SHA256_get_digestbyname_func SHA256_get_digestbyname_p = NULL;
 
 bool LoadSHA256Symbols()
 {
+	SHA256_lib_handle = dlopen(GDSTOOLS_CRYPTO_LIB_C, RTLD_GLOBAL| RTLD_NOW);
+	if(SHA256_lib_handle != NULL) {
+		ssl_lib_v3 = true;
+		goto load_sha256_symbols;
+	}
 	SHA256_lib_handle = dlopen(GDSTOOLS_CRYPTO_LIB_A, RTLD_GLOBAL| RTLD_NOW);
 	if(SHA256_lib_handle != NULL) {
 		goto load_sha256_symbols;
 	}
-
 	SHA256_lib_handle = dlopen(GDSTOOLS_CRYPTO_LIB_B, RTLD_GLOBAL| RTLD_NOW);
 	if(SHA256_lib_handle != NULL) {
 		goto load_sha256_symbols;
 	}
-
 	if(SHA256_lib_handle == NULL) {
-		std::cout << "Unable to load libcrypto library." << std::endl; 
-		std::cout << "Please install" << GDSTOOLS_CRYPTO_LIB_A << " or " << GDSTOOLS_CRYPTO_LIB_B << "depending on your platform " << std::endl;
+		std::cout << "Please install" << GDSTOOLS_CRYPTO_LIB_A << " or " << GDSTOOLS_CRYPTO_LIB_B << " or " << GDSTOOLS_CRYPTO_LIB_A << "depending on your platform " << std::endl;
                 return false;
 	}
 
 load_sha256_symbols:	
-	SHA256_Init_p = (SHA256_Init_func) dlsym(SHA256_lib_handle, "SHA256_Init");
-        if(SHA256_Init_p == NULL) {
-                goto error;
-        }
+	if (!ssl_lib_v3) {
+		SHA256_Init_v1_p = (SHA256_Init_func_v1) dlsym(SHA256_lib_handle, "SHA256_Init");
+		if(SHA256_Init_v1_p == NULL) {
+			goto error;
+		}
 
-        SHA256_Update_p = (SHA256_Update_func) dlsym(SHA256_lib_handle, "SHA256_Update");
-        if(SHA256_Update_p == NULL) {
-                goto error;
-        }
+		SHA256_Update_v1_p = (SHA256_Update_func_v1) dlsym(SHA256_lib_handle, "SHA256_Update");
+		if(SHA256_Update_v1_p == NULL) {
+			goto error;
+		}
 
-        SHA256_Final_p = (SHA256_Final_func) dlsym(SHA256_lib_handle, "SHA256_Final");
-        if(SHA256_Final_p == NULL) {
-                goto error;
-        }
+		SHA256_Final_v1_p = (SHA256_Final_func_v1) dlsym(SHA256_lib_handle, "SHA256_Final");
+		if(SHA256_Final_v1_p == NULL) {
+			goto error;
+		}
+	} else {
+		SHA256_Init_v3_p = (SHA256_Init_func_v3) dlsym(SHA256_lib_handle, "EVP_DigestInit_ex");
+		if(SHA256_Init_v3_p == NULL) {
+			std::cout << "Unable to load EVP_DigestInit_ex symbols" << std::endl;
+			goto error;
+		}
+
+		SHA256_Update_v3_p = (SHA256_Update_func_v3) dlsym(SHA256_lib_handle, "EVP_DigestUpdate");
+		if(SHA256_Update_v3_p == NULL) {
+			std::cout << "Unable to load EVP_DigestUpdate symbols" << std::endl;
+			goto error;
+		}
+
+		SHA256_Final_v3_p = (SHA256_Final_func_v3) dlsym(SHA256_lib_handle, "EVP_DigestFinal_ex");
+		if(SHA256_Final_v3_p == NULL) {
+			std::cout << "Unable to load EVP_DigestFinal_ex symbols" << std::endl;
+			goto error;
+		}
+		SHA256_Mdctx_create_p = (SHA256_Mdctx_create_func) dlsym(SHA256_lib_handle, "EVP_MD_CTX_new");
+		if(SHA256_Mdctx_create_p == NULL) {
+			std::cout << "Unable to load EVP_MD_CTX_new symbols" << std::endl;
+			goto error;
+		}
+		SHA256_Mdctx_destroy_p = (SHA256_Mdctx_destroy_func) dlsym(SHA256_lib_handle, "EVP_MD_CTX_free");
+		if(SHA256_Mdctx_destroy_p == NULL) {
+			std::cout << "Unable to load EVP_MD_CTX_free symbols" << std::endl;
+			goto error;
+		}
+		SHA256_get_digestbyname_p = (SHA256_get_digestbyname_func) dlsym(SHA256_lib_handle, "EVP_get_digestbyname");
+		if(SHA256_get_digestbyname_p == NULL) {
+			std::cout << "Unable to load EVP_get_digestbyname symbols" << std::endl;
+			goto error;
+		}
+	}
         return true;
 error:
 	std::cout << "Unable to load SHA256 symbols" << std::endl;
         dlclose(SHA256_lib_handle);
         SHA256_lib_handle = NULL;
-        SHA256_Init_p = NULL;
-        SHA256_Update_p = NULL;
-        SHA256_Final_p = NULL;
+        SHA256_Init_v1_p = NULL;
+        SHA256_Init_v3_p = NULL;
+        SHA256_Update_v1_p = NULL;
+        SHA256_Update_v3_p = NULL;
+        SHA256_Final_v1_p = NULL;
+        SHA256_Final_v3_p = NULL;
+	SHA256_Mdctx_create_p = NULL;
+	SHA256_Mdctx_destroy_p = NULL;
+	SHA256_get_digestbyname_p = NULL;
 	return false;
 }
 
 void UnLoadSHA256Symbols()
 {
 	if(SHA256_lib_handle) {
-                dlclose (SHA256_lib_handle);
-                SHA256_lib_handle = NULL;
+		dlclose (SHA256_lib_handle);
+		SHA256_lib_handle = NULL;
         }
         return;
 }
 
-int SHA256_Init(SHA256_CTX *c)
+const EVP_MD *EVP_get_digestbyname_sample(const char *name)
 {
-	if(SHA256_Init_p) {
-                return SHA256_Init_p(c);
-        }
+	if(SHA256_get_digestbyname_p) {
+		return SHA256_get_digestbyname_p(name);
+	}
+	return NULL;
+}
+EVP_MD_CTX *SHA256_Mdctx_create_sample()
+{
+	if(SHA256_Mdctx_create_p) {
+		return SHA256_Mdctx_create_p();
+	}
+	return NULL;
+}
+void SHA256_Mdctx_destroy_sample(void *c)
+{
+	if(SHA256_Mdctx_destroy_p) {
+		SHA256_Mdctx_destroy_p((EVP_MD_CTX *)c);
+	}
+	return;
+}
+int SHA256_Init_sample(void *c)
+{
+	if (!ssl_lib_v3) {
+		if(SHA256_Init_v1_p) {
+			return SHA256_Init_v1_p((SHA256_CTX *)c);
+		}
+		return 0;
+	} else {
+		if (SHA256_Init_v3_p) {
+			return SHA256_Init_v3_p((EVP_MD_CTX *)c, EVP_get_digestbyname_sample("sha256"), NULL);
+		} 
+		return 0;
+	}
 	return 0;
 }
 
-int SHA256_Update(SHA256_CTX *c, const void *data, size_t len)
+int SHA256_Update_sample(void *c, const void *data, size_t len)
 {
-	if(SHA256_Update_p) {
-                return SHA256_Update_p(c, data, len);
-        }
+	if (!ssl_lib_v3) {
+		if(SHA256_Update_v1_p) {
+			return SHA256_Update_v1_p((SHA256_CTX *)c, data, len);
+		}
+		return 0;
+	} else {
+		if (SHA256_Update_v3_p) {
+			return SHA256_Update_v3_p((EVP_MD_CTX *)c, data, len);
+		}
+		return 0;
+	}
 	return 0;
 }
 
-int SHA256_Final(unsigned char *md, SHA256_CTX *c)
+int SHA256_Final_sample(unsigned char *md, void *c)
 {
-	if(SHA256_Final_p) {
-                return SHA256_Final_p(md, c);
-        }
+	if (!ssl_lib_v3) {
+		if(SHA256_Final_v1_p) {
+			return SHA256_Final_v1_p(md, (SHA256_CTX *)c);
+		}
+		return 0;
+	} else {
+		if (SHA256_Final_v3_p) {
+			unsigned int n;
+			return SHA256_Final_v3_p((EVP_MD_CTX *)c, md, &n);
+		}
+		return 0;
+	}
 	return 0;
 }
+
 // SHASUM routine : computes digest of nbytes of a file
 static inline int SHASUM256(const char *fpath, unsigned char md[SHA256_DIGEST_LENGTH],
 		size_t bytes = 0) {
 	size_t size;
-	SHA256_CTX c;
+	SHA256_CTX ctx, *c;
+	c = &ctx;
+	EVP_MD_CTX *evp_c;
+
 	char buf[MAX_CHUNK_READ];
 	std::ifstream fp(fpath, std::ifstream::in | std::ifstream::binary);
 
@@ -237,18 +347,36 @@ static inline int SHASUM256(const char *fpath, unsigned char md[SHA256_DIGEST_LE
                 return -1;
 	}
 
-	SHA256_Init(&c);
-
+	if (ssl_lib_v3) {
+		if ((evp_c = SHA256_Mdctx_create_sample()) == NULL) {
+			std::cerr << "MD context creation failed" << std::endl;
+			return -1;
+		}
+		SHA256_Init_sample((void *)evp_c);
+	} else {
+		SHA256_Init_sample((void *)c);
+	}
 	while (bytes && !fp.eof()) {
 		size = std::min(bytes, MAX_CHUNK_READ);
 		fp.read(buf, size);
-		SHA256_Update(&c, buf, fp.gcount());
+		if (!ssl_lib_v3) {
+			SHA256_Update_sample((void *)c, buf, fp.gcount());
+		} else {
+			SHA256_Update_sample((void *)evp_c, buf, fp.gcount());
+		}
 		bytes -= size;
 	}
 
 	fp.close();
 
-	SHA256_Final(md, &c);
+	if (!ssl_lib_v3) {
+		SHA256_Final_sample(md, (void *)c);
+	} else {
+		SHA256_Final_sample(md, (void *)evp_c);
+	}
+	if (ssl_lib_v3) {
+		SHA256_Mdctx_destroy_sample((void *)evp_c);
+	}
 	UnLoadSHA256Symbols();
 	return 0;
 }
@@ -259,43 +387,60 @@ static inline int SHASUM256_DEVICEMEM(char *devPtr,
                          unsigned char md[SHA256_DIGEST_LENGTH],
                          size_t devPtrOff,
                          size_t bytes = 0) {
-	size_t size;
-	SHA256_CTX c;
+	SHA256_CTX ctx, *c;
+	c = &ctx;
+	EVP_MD_CTX *evp_c;
+
 	char buf[MAX_CHUNK_READ];
 	char *devbuf = devPtr + devPtrOff;
 
-	size = memSize - devPtrOff;
-	if (!size || size < 0) {
+	if (memSize <= devPtrOff) {
 		std::cerr << "invalid parameters" << std::endl;
 		return -1;
 	}
 
-	if (bytes > size) {
-		std::cerr << bytes << ":" << size << std::endl;
+	if (bytes > (memSize - devPtrOff)) {
+		std::cerr << bytes << ":" << (memSize - devPtrOff) << std::endl;
 		std::cerr << "bytes more than size" << std::endl;
 		return -1;
 	}
 
 	if (!bytes)
-		bytes = size;
+		bytes = memSize - devPtrOff;
 	
 	if(LoadSHA256Symbols() == false) {
 		std::cerr << "libcrypto not loaded" << std::endl;
 		return -1;
 	}
 
-	SHA256_Init(&c);
+	if (ssl_lib_v3) {
+		if ((evp_c = SHA256_Mdctx_create_sample()) == NULL) {
+			std::cerr << "MD context creation failed" << std::endl;
+			return -1;
+		}
+		SHA256_Init_sample((void *)evp_c);
+	} else {
+		SHA256_Init_sample((void *)c);
+	}
 
 	while (bytes) {
-		size = std::min(bytes, MAX_CHUNK_READ);
+	        size_t size = std::min(bytes, MAX_CHUNK_READ);
 		cudaMemcpy(buf, devbuf, size, cudaMemcpyDeviceToHost);
-		SHA256_Update(&c, buf, size);
+		if (!ssl_lib_v3) {
+			SHA256_Update_sample((void *)c, buf, size);
+		} else {
+			SHA256_Update_sample((void *)evp_c, buf, size);
+		}
 		bytes -= size;
 		devbuf += size;
 	}
 
-	SHA256_Final(md, &c);
-
+	if (!ssl_lib_v3) {
+		SHA256_Final_sample(md, (void *)c);
+	} else {
+		SHA256_Final_sample(md, (void *)evp_c);
+		SHA256_Mdctx_destroy_sample((void *)evp_c);
+	}
 	UnLoadSHA256Symbols();
 	return 0;
 }

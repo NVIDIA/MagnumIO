@@ -45,29 +45,56 @@ CXXFLAGS    += -I $(CUFILE_INCLUDE_PATH)
 ifneq ($(CONFIG_CODE_COVERAGE),)
 CXXFLAGS    += -ftest-coverage -fprofile-arcs
 endif
-CXXFLAGS += -std=c++11
+CXXFLAGS += -std=c++17
 ###########################
 CUDART_STATIC := -Bstatic -L $(CUDA_PATH)/lib64/ -lcudart_static -lrt -lpthread -ldl
 LDFLAGS     :=  $(CUFILE_LIB) $(CUDART_STATIC) -lcrypto -lssl
 CUFILE_LIB  := -L $(CUFILE_PATH) -lcufile
 CUFILE_LIB_STATIC  := -L $(CUFILE_PATH) -lcufile_static
 #CUFILE_LIB := -Bstatic -L $(CUFILE_PATH) -lcufile_static
-LDFLAGS     :=  $(CUFILE_LIB) -L $(CUDA_PATH)/lib64/ -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
-LDFLAGS_STATIC     :=  $(CUFILE_LIB_STATIC) -L $(CUDA_PATH)/lib64/ -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
+LDFLAGS     :=  $(CUFILE_LIB) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
+LDFLAGS_STATIC     :=  $(CUFILE_LIB_STATIC) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
 INSTALL_GDSSAMPLES_PREFIX = /usr/local/gds/samples
+NVCC          :=$(CUDA_PATH)//bin/nvcc
 
 ################################################################################
 CC:=g++
-DOCKER_BUILD_REPO=gds_build:centos7-mofed-5-1-cuda-10-1
+DOCKER_BUILD_REPO=gds_build:manylinux2014-mofed-5-1-cuda-11-1
+DOCKERFILE_BUILD_PATH=../../docker/manylinux2014-docker/Dockerfile-manylinux2014-cuda-11-1-MOFED-5-1
 # Target rules
 all: build
 release_samples:
-	docker build -t $(DOCKER_BUILD_REPO) -f ../../docker/centos7-docker/Dockerfile-centos-10-1-MOFED-5-1 ./
+	docker build -t $(DOCKER_BUILD_REPO) -f $(DOCKERFILE_BUILD_PATH) ./
 	docker run -v `pwd`/../../:/nvme-direct:rw --rm -it $(DOCKER_BUILD_REPO) sh -c "cd /nvme-direct/tools/samples;$(MAKE) build"
 	@echo "Release samples Built"
 
+vectorAdd.o : vectorAdd.cu
+	$(NVCC) $(INCLUDES) --cudart static -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_61,code=compute_61 --ptxas-options=-v --compiler-options --compile --lib -o vectorAdd.o vectorAdd.cu
 
-build: cufile_sample_001 cufile_sample_002 cufile_sample_003 cufile_sample_004 cufile_sample_005 cufile_sample_006 cufile_sample_007 cufile_sample_008 cufile_sample_009 cufile_sample_010 cufile_sample_011 cufile_sample_012 cufile_sample_013 cufile_sample_014 cufile_sample_015 cufile_sample_016 cufile_sample_017 cufile_sample_018 cufile_sample_019 cufile_sample_001_static cufile_sample_002_static cufile_sample_003_static cufile_sample_004_static cufile_sample_005_static cufile_sample_006_static cufile_sample_007_static cufile_sample_008_static cufile_sample_009_static cufile_sample_010_static cufile_sample_011_static cufile_sample_012_static cufile_sample_013_static cufile_sample_014_static cufile_sample_015_static cufile_sample_016_static cufile_sample_017_static cufile_sample_018_static cufile_sample_019_static cufile_sample_020_static cufile_sample_020 cufile_sample_021 cufile_sample_022
+build: cufile_sample_001 cufile_sample_002 cufile_sample_003 cufile_sample_004 cufile_sample_005 cufile_sample_006 cufile_sample_007 cufile_sample_008 cufile_sample_009 cufile_sample_010 cufile_sample_011 cufile_sample_012 cufile_sample_013 cufile_sample_014 cufile_sample_015 cufile_sample_016 cufile_sample_017 cufile_sample_018 cufile_sample_019 cufile_sample_020 cufile_sample_021 cufile_sample_022 cufile_sample_023 cufile_sample_024 cufile_sample_025 cufile_sample_026 cufile_sample_027 cufile_sample_001_static cufile_sample_002_static cufile_sample_003_static cufile_sample_004_static cufile_sample_005_static cufile_sample_006_static cufile_sample_007_static cufile_sample_008_static cufile_sample_009_static cufile_sample_010_static cufile_sample_011_static cufile_sample_012_static cufile_sample_013_static cufile_sample_014_static cufile_sample_015_static cufile_sample_016_static cufile_sample_017_static cufile_sample_018_static cufile_sample_019_static cufile_sample_020_static cufile_sample_021_static cufile_sample_022_static cufile_sample_023_static cufile_sample_024_static cufile_sample_025_static cufile_sample_026_static cufile_sample_027_static
+
+cufile_sample_023: cufile_sample_023.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
+
+cufile_sample_025: cufile_sample_025.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
+
+cufile_sample_026: cufile_sample_026.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
+
+cufile_sample_023_static: cufile_sample_023.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
+
+cufile_sample_025_static: cufile_sample_025.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
+
+cufile_sample_026_static: cufile_sample_026.cc vectorAdd.o
+	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
+
+cufile_sample_024: cufile_sample_024.cu
+	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) $< -o $@ $(CUFILE_LIB) -lcuda
+cufile_sample_024_static: cufile_sample_024.cu
+	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $< -o $@ $(CUFILE_LIB_STATIC) -lcuda
 
 %: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h
 	$(CC) $(CXXFLAGS) $< -o $@ $(LDFLAGS)
@@ -75,9 +102,10 @@ build: cufile_sample_001 cufile_sample_002 cufile_sample_003 cufile_sample_004 c
 	$(CC) $(CXXFLAGS) $< -o $@ $(LDFLAGS_STATIC)
 
 install:
-	cp cufile_sample_*.cc cufile_sample_*.h Makefile README $(INSTALL_GDSSAMPLES_PREFIX)/
+	cp vectorAdd.cu cufile_sample_024.cu cufile_sample_*.cc cufile_sample_*.h Makefile README $(INSTALL_GDSSAMPLES_PREFIX)/
 
 clean:
-	rm -f cufile_sample_001 cufile_sample_001.o cufile_sample_002 cufile_sample_002.o cufile_sample_003 cufile_sample_003.o cufile_sample_004 cufile_sample_004.o cufile_sample_005 cufile_sample_005.o cufile_sample_006 cufile_sample_006.o cufile_sample_007 cufile_sample_007.o cufile_sample_008 cufile_sample_008.o cufile_sample_009 cufile_sample_009.o cufile_sample_010 cufile_sample_010.o cufile_sample_011 cufile_sample_011.o cufile_sample_012 cufile_sample_012.o cufile_sample_013 cufile_sample_013.o cufile_sample_014 cufile_sample_014.o cufile_sample_015 cufile_sample_015.o cufile_sample_016.o cufile_sample_016 cufile_sample_017.o cufile_sample_017 cufile_sample_018.o cufile_sample_019.o cufile_sample_018 cufile_sample_001_static cufile_sample_002_static cufile_sample_003_static cufile_sample_004_static cufile_sample_005_static cufile_sample_006_static cufile_sample_007_static cufile_sample_008_static cufile_sample_009_static cufile_sample_010_static cufile_sample_011_static cufile_sample_012_static cufile_sample_013_static cufile_sample_014_static cufile_sample_015_static cufile_sample_016_static cufile_sample_017_static cufile_sample_018_static cufile_sample_019_static cufile_sample_019 cufile_sample_020_static cufile_sample_020 cufile_sample_021 cufile_sample_022
+	find . -type f -executable -delete
+	rm -f *.o
 
 .PHONY : build install clean
