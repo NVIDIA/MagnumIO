@@ -699,6 +699,45 @@ int main(int argc, char **argv)
 
     std::cout << "Auto register for newer allocation" << std::endl;
 
+#if 0
+
+    // free previous cufile registrations 
+    status = cuFileBufDeregister((void*)d_A);
+    if (status.err != CU_FILE_SUCCESS) {
+            ret = -1;
+            std::cerr << "buffer deregister failed:"
+                    << cuFileGetErrorString(status) << std::endl;
+    }
+    // deregister the device memory
+    status = cuFileBufDeregister((void*)d_B);
+    if (status.err != CU_FILE_SUCCESS) {
+            ret = -1;
+            std::cerr << "buffer deregister failed:"
+                    << cuFileGetErrorString(status) << std::endl;
+    }
+
+    std::cout << "Re-registering device memory(" << std::hex << d_A << ") of size :" << std::dec << allocationSizeA << std::endl;
+    // registers device memory
+    status = cuFileBufRegister((void*)d_A, allocationSizeA, 0);
+    if (status.err != CU_FILE_SUCCESS) {
+            ret = -1;
+            std::cerr << "buffer register A failed:"
+                    << cuFileGetErrorString(status) << std::endl;
+            exit(EXIT_FAILURE);
+    }
+
+    std::cout << "Re-registering  device memory d_B(" << std::hex << d_B << ") of size :" << std::dec << allocationSizeB << std::endl;
+    // registers device memory
+    status = cuFileBufRegister((void*)d_B, allocationSizeB, 0);
+    if (status.err != CU_FILE_SUCCESS) {
+            ret = -1;
+            std::cerr << "buffer register B failed:"
+                    << cuFileGetErrorString(status) << std::endl;
+            exit(EXIT_FAILURE);
+    }
+
+#endif
+
     std::cout << "writing from device memory d_A to file:" << TESTFILEA << std::endl;
 
     // writes device memory contents A to a fileA for size bytes
@@ -754,6 +793,7 @@ int main(int argc, char **argv)
             std::cout << "read bytes to d_A:" << ret << std::endl;
             ret = 0;
     }
+
 
     std::cout << "reading to device memory d_B from file:" << TESTFILEB << std::endl;
     // reads device memory contents B from file B for size bytes

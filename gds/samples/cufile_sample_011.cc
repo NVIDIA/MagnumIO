@@ -21,6 +21,7 @@
 #include <cuda_runtime.h>
 
 #include "cufile.h"
+#include "cufile_sample_utils.h"
 
 /*
  * This sample shows how two threads can share the same CUFileHandle;
@@ -32,15 +33,6 @@
 #define GB(x) ((x)*1024*1024*1024L)
 #define MB(x) ((x)*1024*1024L)
 #define KB(x) ((x)*1024L)
-
-//Macro for checking cuda errors following a cuda launch or api call
-#define cudaCheckError() {                                          \
-        cudaError_t e=cudaGetLastError();                                 \
-        if(e!=cudaSuccess) {                                              \
-            printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-            exit(EXIT_FAILURE);                                           \
-        }                                                                 \
-    }
 
 typedef struct cfg {
 	int gpu;
@@ -54,16 +46,14 @@ static void *thread_fn(void *data)
 	void *gpubuffer;
 	int i, nr_ios;
 	loff_t offset = 0;
-	
-	cudaSetDevice(cfg->gpu);
-	cudaCheckError();
+
+	check_cudaruntimecall(cudaSetDevice(cfg->gpu));
 
 	/*
 	 * Each thread allocates 1 GB of GPU Memory;
 	 * However, there is no cuFileBufRegister now.
 	 */
-	cudaMalloc(&gpubuffer, GB(1));
-	cudaCheckError();
+	check_cudaruntimecall(cudaMalloc(&gpubuffer, GB(1)));
 
 	nr_ios = GB(1)/MB(100);
 
@@ -102,7 +92,7 @@ static void *thread_fn(void *data)
 
 	fprintf(stdout, "Read Success from file %s to GPU %d\n", cfg->filename, cfg->gpu);
 err:
-	cudaFree(gpubuffer);
+	check_cudaruntimecall(cudaFree(gpubuffer));
 	return NULL;
 }
 

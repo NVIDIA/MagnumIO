@@ -22,26 +22,18 @@
 #include <cuda_runtime.h>
 
 #include "cufile.h"
+#include "cufile_sample_utils.h"
 
 /*
  * In this sample program, main thread will allocate 100 MB of GPU memory
  * The entire GPU memory will be populated with data by 10 threads.
- * Each thread will read the data at different offsets.
+ * Each thread will read 10MB of data starting at fixed (10MB * thread_index) offset.
  */
 
 #define TOGB(x) ((x)/(1024*1024*1024L))
 #define GB(x) ((x)*1024*1024*1024L)
 #define MB(x) ((x)*1024*1024L)
 #define KB(x) ((x)*1024L)
-
-//Macro for checking cuda errors following a cuda launch or api call
-#define cudaCheckError() {                                          \
-        cudaError_t e=cudaGetLastError();                                 \
-        if(e!=cudaSuccess) {                                              \
-            printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-            exit(EXIT_FAILURE);                                           \
-        }                                                                 \
-    }
 
 typedef struct thread_data
 {
@@ -65,8 +57,7 @@ static void *thread_fn(void *data)
 	 * we set it explicitly. However, threads have to ensure that they are in
 	 * same cuda context as devPtr was allocated.
 	 */
-	cudaSetDevice(0);
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
 
 	memset((void *)&cfr_descr, 0, sizeof(CUfileDescr_t));
 	cfr_descr.handle.fd = fd;
@@ -127,11 +118,8 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	cudaSetDevice(0);
-	cudaCheckError();
-
-	cudaMalloc(&devPtr, MB(100));
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
+	check_cudaruntimecall(cudaMalloc(&devPtr, MB(100)));
 
         for (int i = 0; i < 10; i++) {
                 int fd  = open(argv[1], O_RDWR | O_DIRECT);
@@ -144,9 +132,8 @@ int main(int argc, char **argv) {
                         exit(1);
                 }
                 t[i].fd = fd;
-                t[i].devPtr = devPtr;
+                t[i].devPtr = (char *)devPtr + offset;
 		t[i].offset = offset;
-		devPtr = (char *)devPtr + MB(10);
 		offset += MB(10);
 	}
 
@@ -159,6 +146,6 @@ int main(int argc, char **argv) {
 		pthread_join(thread[i], NULL);
 	}
 
-	cudaFree(devPtr);
+	check_cudaruntimecall(cudaFree(devPtr));
 	return 0;
 }

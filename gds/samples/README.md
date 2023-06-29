@@ -107,7 +107,8 @@ This sample uses cuFileBufRegister alternately per thread.
 
 **cufile_sample_015**: Sample file data integrity test with cuFileRead and cuFileWrite with Managed Memory
 ``` bash
-./cufile_sample_015 <file-path-1> <file-path-2> <gpu-id> <mode>
+./cufile_sample_015 <file-path-1> <file-path-2> <gpu-id> <mode>, where mode is the memory type
+(DeviceMemory = 1, ManagedMemory = 2, HostMemory = 3)
 ``` 
 **Note**: mode is the memory type (DeviceMemory = 1, ManagedMemory = 2, HostMemory = 3)
 
@@ -146,9 +147,9 @@ buffer offsets of a memory allocated using single allocation and single buffer r
 ./cufile_sample_021 <file-path>  <gpuid> <num batch entries>
 ```
 
-**cufile_sample_022**: This sample shows the usage of cuFile Batch API to perform cuFileBatchIOGetStatus after submitting a batch read.
+**cufile_sample_022**: This sample shows the usage of cuFile Batch API to perform cuFileBatchIOGetStatus after submitting a batch read. The non O_DIRECT mode works only with libcufile version 12.2 and above. In this sample, nondirectflag is not a mandatory option
 ``` bash
-./cufile_sample_022 <file-path>  <gpuid> <num batch entries>
+./cufile_sample_022 <file-path>  <gpuid> <nondirectflag>
 ```
 
 **cufile_sample_023**: This sample shows the usage of cuFile API with simple cuMemMap allocations.
@@ -159,19 +160,62 @@ buffer offsets of a memory allocated using single allocation and single buffer r
 **cufile_sample_024**: This sample shows the usage of cuFile API with simple cuMemMap allocations and Thrust.
 ``` bash
 ./cufile_sample_024 <file-path> 
-
 ```
+
 **cufile_sample_025**: This sample shows the usage of cuFile API with simple cuMemMap allocations with resize operation.
 ``` bash
 ./cufile_sample_025  <filepathA> <filepathB>
-
 ```
+
 **cufile_sample_026**: This sample shows the usage of cuFile API with simple cuMemMap allocations with multiple resize operations.
 ``` bash
 ./cufile_sample_026  <filepathA> <filepathB>
 ```
 
-**cufile_sample_027**: This sample shows the usage of cuFile Batch API for unaligned writes.
+**cufile_sample_027**: This sample shows cuFileBatchIOSubmit Write Test for unaligned I/O with a variation of files opened in O_DIRECT and non O_DIRECT mode. The non O_DIRECT mode works only with libcufile version 12.2 and above.
 ``` bash
-./cufile_sample_027 <file-path> <gpuid> <num batch entries>
+./cufile_sample_027 <filepath> <gpuid> <num batch entries> <nondirectflag>
+```
+
+Note: Following samples work only with libcufile version 12.2 and above.
+
+**cufile_sample_028**: This sample shows the simple usage of cuFileWrite API without O_DIRECT MODE. The non O_DIRECT mode works only with libcufile version 12.2 and above.
+``` bash
+./cufile_sample_028 <file-path> <gpuid>
+```
+
+**cufile_sample_029**: This sample shows usage of cuFileBatchIOSubmit API for writes with various combinations of files opened in regular mode, O_DIRECT mode,
+                   unaligned I/O, half unregistered buffers and half registered buffers.
+                   This sample has files opened with O_DIRECT and non O_DIRECT mode alternatively in the batch.
+``` bash
+./cufile_sample_029 <filepath> <gpuid> <num batch entries> <nondirectflag>
+```
+
+**cufile_sample_030**: This sample shows cuFileBatchIOSubmit Write Test for combination of unaligned I/O, unregistered buffers and registered buffers,
+                   This sample has files opened with O_DIRECT and non O_DIRECT mode alternatively in the batch.
+                   This sample cycles batch entries with different kinds of memory (cudaMalloc, cudaMallocHost, malloc, mmap) to files in a single batch.
+``` bash
+./cufile_sample_030 <filepath> <gpuid> <num batch entries> <Buf Register 0 - register all buffers, 1 - unregistered buffers> <nondirectflag>
+```
+
+**cufile_sample_031**: This is a data-integrity test using cuFileReadAsync/WriteAsync APIs using default stream.
+``` bash
+./cufile_sample_031 <readfilepath> <writefilepath> <gpuid>
+```
+
+**cufile_sample_032**: This is a data-integrity test using cuFileReadAsync/WriteAsync APIs.
+``` bash
+./cufile_sample_032 <readfilepath> <writefilepath> <gpuid>
+```
+
+**cufile_sample_033**: This is a data-integrity test using cuFileReadAsync/WriteAsync APIs.
+This shows how the async apis can be used in a batch mode.
+``` bash
+./cufile_sample_033 <readfilepath> <writefilepath> <gpuid>
+```
+
+**cufile_sample_034**: This is a data-integrity test using cuFileReadAsync/WriteAsync APIs with cufile stream registration.
+This shows how the async apis can be used in a batch mode.
+``` bash
+./cufile_sample_034 <readfilepath> <writefilepath> <gpuid>
 ```

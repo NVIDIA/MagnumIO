@@ -406,7 +406,7 @@ static inline int SHASUM256_DEVICEMEM(char *devPtr,
 	}
 
 	if (!bytes)
-		bytes = memSize - devPtrOff;
+	        bytes = memSize - devPtrOff;
 	
 	if(LoadSHA256Symbols() == false) {
 		std::cerr << "libcrypto not loaded" << std::endl;
@@ -424,7 +424,7 @@ static inline int SHASUM256_DEVICEMEM(char *devPtr,
 	}
 
 	while (bytes) {
-	        size_t size = std::min(bytes, MAX_CHUNK_READ);
+		size_t size = std::min(bytes, MAX_CHUNK_READ);
 		cudaMemcpy(buf, devbuf, size, cudaMemcpyDeviceToHost);
 		if (!ssl_lib_v3) {
 			SHA256_Update_sample((void *)c, buf, size);

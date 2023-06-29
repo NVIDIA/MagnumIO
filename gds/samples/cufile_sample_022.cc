@@ -37,6 +37,7 @@ using namespace std;
 
 int main(int argc, char *argv[]) {
     int fd[MAX_BATCH_IOS];
+    int nonDirFlag = 0;
     ssize_t ret = -1;
     void *devPtr[MAX_BATCH_IOS];
     const size_t size = MAX_BUFFER_SIZE;
@@ -58,7 +59,7 @@ int main(int argc, char *argv[]) {
     unsigned entries_reaped = 0;
 
     if(argc < 3) {
-        std::cerr << argv[0] << " <filepath> <gpuid>"<< std::endl;
+        std::cerr << argv[0] << " <filepath> <gpuid> <nondirectflag> "<< std::endl;
         exit(1);
     }
     memset(&stream, 0, sizeof (CUstream));
@@ -74,10 +75,19 @@ int main(int argc, char *argv[]) {
 
     batch_size = MAX_BATCH_IOS;
 
-
+    if (argc > 3)
+	    nonDirFlag = atoi(argv[3]);
     // opens a file to write
     for(i = 0; i < batch_size; i++) {
-        fd[i] = open(TESTFILE, O_CREAT | O_RDWR | O_DIRECT, 0664);
+	    if (nonDirFlag == 0) {
+		    fd[i] = open(TESTFILE, O_CREAT | O_RDWR | O_DIRECT, 0664);
+	    } else {
+		    if (i % 2 == 0) {
+			    fd[i] = open(TESTFILE, O_CREAT | O_RDWR | O_DIRECT, 0664);
+		    } else {
+			    fd[i] = open(TESTFILE, O_CREAT | O_RDWR, 0664);
+		    }
+	    }
         if (fd[i] < 0) {
             std::cerr << "file open error:"
                 << cuFileGetErrorString(errno) << std::endl;
