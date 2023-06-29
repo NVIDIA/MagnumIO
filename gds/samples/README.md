@@ -1,6 +1,6 @@
 ## cuFile API Samples
 
-Samples for CUDA Developers which demonstrates cuFile APIs in CUDA Toolkit. This version supports [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 11.4 and onwards. Each sample is intended to show different aspect of application development using cuFile APIs.
+Samples for CUDA Developers which demonstrates cuFile APIs in CUDA Toolkit. This version supports [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 11.4 and above. Each sample is intended to show different aspect of application development using cuFile APIs.
 
 **Note**: The sample tests expect the data files to be present and atleast 128MiB in size.
       The data files should have read/write permissions in GDS enabled mounts.
