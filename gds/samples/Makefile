@@ -34,9 +34,15 @@
 ################################################################################
 
 # Common includes and paths for CUDA
+ARCH ?= $(shell uname -m)
 CUDA_PATH   := /usr/local/cuda
-CUFILE_PATH ?= /usr/local/cuda/targets/x86_64-linux/lib/
-CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/x86_64-linux/include/
+ifeq ($(ARCH),aarch64)
+	CUFILE_PATH ?= /usr/local/cuda/targets/sbsa-linux/lib/
+	CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/sbsa-linux/include/
+else
+	CUFILE_PATH ?= /usr/local/cuda/targets/x86_64-linux/lib/
+	CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/x86_64-linux/include/
+endif
 CXXFLAGS    := -Wall
 CXXFLAGS    += -I $(CUDA_PATH)/include/ 
 CXXFLAGS    += -I $(CUFILE_INCLUDE_PATH)
@@ -68,44 +74,44 @@ release_samples:
 	docker run -v `pwd`/../../:/nvme-direct:rw --rm -it $(DOCKER_BUILD_REPO) sh -c "cd /nvme-direct/tools/samples;$(MAKE) build"
 	@echo "Release samples Built"
 
+
+samples = $(wildcard cufile_sample_*.cc)
+cusamples = $(wildcard cufile_sample_*.cu)
+objs = $(samples:.cc=)  $(samples:.cc=_static)
+cuobjs = $(cusamples:.cu=) vectorAdd.o
+build: $(objs) $(cuobjs)
+
+CUDA_ARCH = -gencode=arch=compute_60,code=sm_60 \
+            -gencode=arch=compute_61,code=sm_61 \
+            -gencode=arch=compute_61,code=sm_61 \
+            -gencode=arch=compute_61,code=sm_61 \
+            -gencode=arch=compute_62,code=sm_62 \
+            -gencode=arch=compute_70,code=sm_70 \
+            -gencode=arch=compute_72,code=sm_72 \
+            -gencode=arch=compute_75,code=sm_75 \
+            -gencode=arch=compute_80,code=sm_80 \
+            -gencode=arch=compute_86,code=sm_86 \
+            -gencode=arch=compute_80,code=compute_80
+
 vectorAdd.o : vectorAdd.cu
-	$(NVCC) $(INCLUDES) --cudart static -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_61,code=compute_61 --ptxas-options=-v --compiler-options --compile --lib -o vectorAdd.o vectorAdd.cu
+	$(NVCC) $(INCLUDES) --cudadevrt static --cudart static \
+		$(CUDA_ARCH)  --ptxas-options=-v --compiler-options \
+		--compile --lib $< -o $@
 
-build: cufile_sample_001 cufile_sample_002 cufile_sample_003 cufile_sample_004 cufile_sample_005 cufile_sample_006 cufile_sample_007 cufile_sample_008 cufile_sample_009 cufile_sample_010 cufile_sample_011 cufile_sample_012 cufile_sample_013 cufile_sample_014 cufile_sample_015 cufile_sample_016 cufile_sample_017 cufile_sample_018 cufile_sample_019 cufile_sample_020 cufile_sample_021 cufile_sample_022 cufile_sample_023 cufile_sample_024 cufile_sample_025 cufile_sample_026 cufile_sample_027 cufile_sample_001_static cufile_sample_002_static cufile_sample_003_static cufile_sample_004_static cufile_sample_005_static cufile_sample_006_static cufile_sample_007_static cufile_sample_008_static cufile_sample_009_static cufile_sample_010_static cufile_sample_011_static cufile_sample_012_static cufile_sample_013_static cufile_sample_014_static cufile_sample_015_static cufile_sample_016_static cufile_sample_017_static cufile_sample_018_static cufile_sample_019_static cufile_sample_020_static cufile_sample_021_static cufile_sample_022_static cufile_sample_023_static cufile_sample_024_static cufile_sample_025_static cufile_sample_026_static cufile_sample_027_static
-
-cufile_sample_023: cufile_sample_023.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
-
-cufile_sample_025: cufile_sample_025.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
-
-cufile_sample_026: cufile_sample_026.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS)
-
-cufile_sample_023_static: cufile_sample_023.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
-
-cufile_sample_025_static: cufile_sample_025.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
-
-cufile_sample_026_static: cufile_sample_026.cc vectorAdd.o
-	$(CC) $(CXXFLAGS) $< vectorAdd.o -o $@ $(LDFLAGS_STATIC)
+%: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h vectorAdd.o
+	$(CC) $(INCLUDES) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+%_static: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h vectorAdd.o
+	$(CC)  $(INCLUDES) $(CXXFLAGS) $^ -o $@ $(LDFLAGS_STATIC)
 
 cufile_sample_024: cufile_sample_024.cu
-	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) $< -o $@ $(CUFILE_LIB) -lcuda
-cufile_sample_024_static: cufile_sample_024.cu
-	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $< -o $@ $(CUFILE_LIB_STATIC) -lcuda
-
-%: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h
-	$(CC) $(CXXFLAGS) $< -o $@ $(LDFLAGS)
-%_static: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h
-	$(CC) $(CXXFLAGS) $< -o $@ $(LDFLAGS_STATIC)
+	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudadevrt static --cudart static $(CUDA_ARCH) $^ -o $@ $(CUFILE_LIB) -lcuda
+	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $(CUDA_ARCH) $^ -o $@_static $(CUFILE_LIB_STATIC) -lcuda
 
 install:
-	cp vectorAdd.cu cufile_sample_024.cu cufile_sample_*.cc cufile_sample_*.h Makefile README $(INSTALL_GDSSAMPLES_PREFIX)/
+	cp vectorAdd.cu cufile_sample_*.cu cufile_sample_*.cc cufile_sample_*.h Makefile README $(INSTALL_GDSSAMPLES_PREFIX)/
 
 clean:
 	find . -type f -executable -delete
-	rm -f *.o
+	rm -f *.o cufile.log
 
 .PHONY : build install clean

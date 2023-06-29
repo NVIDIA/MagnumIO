@@ -21,6 +21,7 @@
 #include <cuda_runtime.h>
 
 #include "cufile.h"
+#include "cufile_sample_utils.h"
 
 /*
  * This sample shows how two threads independently open the file and
@@ -32,15 +33,6 @@
 #define GB(x) ((x)*1024*1024*1024L)
 #define MB(x) ((x)*1024*1024L)
 #define KB(x) ((x)*1024L)
-
-//Macro for checking cuda errors following a cuda launch or api call
-#define cudaCheckError() {                                          \
-        cudaError_t e=cudaGetLastError();                                 \
-        if(e!=cudaSuccess) {                                              \
-            printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-            exit(EXIT_FAILURE);                                           \
-        }                                                                 \
-    }
 
 typedef struct thread_data
 {
@@ -71,12 +63,10 @@ static void *thread_fn(void *data)
 	}
 
 	/* this should be set to same pci hierarchy of the peer device */
-	cudaSetDevice(0);
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
 
 	for (int j = 0; j < 64; j++) {
-		cudaMalloc(&gpubuffer[j], MB(1));
-		cudaCheckError();
+		check_cudaruntimecall(cudaMalloc(&gpubuffer[j], MB(1)));
 
 		/*
 		 * Each thread allocates GPU Memory
@@ -124,7 +114,7 @@ err:
 			}
 		}
 
-		cudaFree(gpubuffer[j]);
+		check_cudaruntimecall(cudaFree(gpubuffer[j]));
 	}
 
 	close(fd);

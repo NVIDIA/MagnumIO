@@ -22,6 +22,7 @@
 #include <cuda_runtime.h>
 
 #include "cufile.h"
+#include "cufile_sample_utils.h"
 
 /*
  * In this sample program, main thread will allocate 100 MB of GPU memory
@@ -33,15 +34,6 @@
 #define GB(x) ((x)*1024*1024*1024L)
 #define MB(x) ((x)*1024*1024L)
 #define KB(x) ((x)*1024L)
-
-//Macro for checking cuda errors following a cuda launch or api call
-#define cudaCheckError() {                                          \
-        cudaError_t e=cudaGetLastError();                                 \
-        if(e!=cudaSuccess) {                                              \
-            printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-            exit(EXIT_FAILURE);                                           \
-        }                                                                 \
-}
 
 typedef struct thread_data
 {
@@ -56,9 +48,7 @@ static void *thread_fn(void *data)
 	int ret;	
 	thread_data_t *t = (thread_data_t *)data;
 
-	cudaSetDevice(0);
-	cudaCheckError();
-
+	check_cudaruntimecall(cudaSetDevice(0));
 
 	for (int i = 0; i < 100; i++) {
 		/*
@@ -120,11 +110,8 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	cudaSetDevice(0);
-	cudaCheckError();
-
-	cudaMalloc(&devPtr, MB(100));
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
+	check_cudaruntimecall(cudaMalloc(&devPtr, MB(100)));
 
 	/*
 	 * Entire Memory is registered
@@ -170,6 +157,6 @@ int main(int argc, char **argv) {
 
 	cuFileHandleDeregister(cfr_handle);
 	close(fd);
-	cudaFree(devPtr);
+	check_cudaruntimecall(cudaFree(devPtr));
 	return 0;
 }

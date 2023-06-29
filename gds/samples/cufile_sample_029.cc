@@ -9,9 +9,14 @@
  *
  */
 /*
- * Sample cuFileBatchIOSubmit cancel Test.
+ * Sample This sample shows usage of cuFileBatchIOSubmit API for writes with various combinations of files opened in regular mode, O_DIRECT mode,
+          unaligned I/O, half unregistered buffers and half registered buffers.
  *
- * This cancels I/O after submitting a read request thtough Batch API's.
+ * This writes data from GPU memory to a file using the Batch API's.
+ * For verification, input data has a pattern.
+ * User can verify the output file-data after write using
+ * hexdump -C <filepath>
+ * 00000000  ab ab ab ab ab ab ab ab  ab ab ab ab ab ab ab ab  |................|
  */
 #include <fcntl.h>
 #include <assert.h>
@@ -30,13 +35,13 @@
 
 using namespace std;
 
-#define MAX_BUFFER_SIZE 4096
+#define MAX_BUFFER_SIZE 4
 #define MAX_BATCH_IOS 128
 
 int main(int argc, char *argv[]) {
 	int fd[MAX_BATCH_IOS];
 	int nonDirFlag = 0;
-	ssize_t ret = -1;
+	ssize_t ret = 0;
 	void *devPtr[MAX_BATCH_IOS];
 	const size_t size = MAX_BUFFER_SIZE;
 	CUfileError_t status;
@@ -52,12 +57,13 @@ int main(int argc, char *argv[]) {
 	CUfileBatchHandle_t batch_id;
 	unsigned nr;
 	unsigned batch_size;
+	unsigned num_completed = 0;
 
 	if(argc < 4) {
                 std::cerr << argv[0] << " <filepath> <gpuid> <num batch entries> <nondirectflag> "<< std::endl;
                 exit(1);
         }
-	memset(&stream, 0, sizeof (CUstream));
+	memset(&stream, 0, sizeof(CUstream));
         TESTFILE = argv[1];
 	check_cudaruntimecall(cudaSetDevice(atoi(argv[2])));
 
@@ -67,6 +73,7 @@ int main(int argc, char *argv[]) {
 			<< cuFileGetErrorString(status) << std::endl;
                 return -1;
         }
+	std::cout << "opening file " << TESTFILE << std::endl;
 	
 	batch_size = atoi(argv[3]);
 	
@@ -105,6 +112,7 @@ int main(int argc, char *argv[]) {
 				<< cuFileGetErrorString(status) << std::endl;
 			close(fd[i]);
 			fd[i] = -1;
+			ret = -1;
 			goto out1;
 		}
 	}
@@ -112,21 +120,29 @@ int main(int argc, char *argv[]) {
 	for(i = 0; i < batch_size; i++) {
 		devPtr[i] = NULL;
 		check_cudaruntimecall(cudaMalloc(&devPtr[i], size));
-		check_cudaruntimecall(cudaMemset((void*)(devPtr[i]), 0xab, size));
-		check_cudaruntimecall(cudaStreamSynchronize(0));	
+		std::cout << "devptr = " << devPtr[i] << std::endl;
+		check_cudaruntimecall(cudaMemset((void*)(devPtr[i]), 0xef + i, size));
+		check_cudaruntimecall(cudaStreamSynchronize(0));
 	}
 	// filler
 
+	std::cout << "registering device memory of size :" << size << std::endl;
 	// registers device memory
+	// Only even indexed entries are using registered buffers. 
 	for(i = 0; i < batch_size; i++) {
-		status = cuFileBufRegister(devPtr[i], size, 0);
-		if (status.err != CU_FILE_SUCCESS) {
-			ret = -1;
-			std::cerr << "buffer register failed:"
-				<< cuFileGetErrorString(status) << std::endl;
-			goto out2;
+		if ((i % 2) == 0) {
+			status = cuFileBufRegister(devPtr[i], size, 0);
+			if (status.err != CU_FILE_SUCCESS) {
+				ret = -1;
+				std::cerr << "buffer register failed:"
+					<< cuFileGetErrorString(status) << std::endl;
+				goto out2;
+			}
 		}
 	}
+
+	std::cout << "writing from device memory" << std::endl;
+
 
 	for(i = 0; i < batch_size; i++) {
 		io_batch_params[i].mode = CUFILE_BATCH;
@@ -135,33 +151,43 @@ int main(int argc, char *argv[]) {
 		io_batch_params[i].u.batch.file_offset = i * size;
 		io_batch_params[i].u.batch.devPtr_offset = 0;
 		io_batch_params[i].u.batch.size = size;
-		io_batch_params[i].opcode = CUFILE_READ;
+		io_batch_params[i].opcode = CUFILE_WRITE;
 	}
 
+	std::cout << "Setting Up Batch" << std::endl;
+	
 	errorBatch = cuFileBatchIOSetUp(&batch_id, batch_size);
 	if(errorBatch.err != 0) {
 		std::cerr << "Error in setting Up Batch" << std::endl;
+		ret = -1;
 		goto out3;
 	}
+	std::cout << "Submitting Batch IO" << std::endl;
+	
 	errorBatch = cuFileBatchIOSubmit(batch_id, batch_size, io_batch_params, flags);	
 	if(errorBatch.err != 0) {
-		std::cerr << "Error in IO Batch Submit" << std::endl;
+		std::cerr<< "Error in IO Batch Submit" << std::endl;
+		ret = -1;
 		goto out3;
 	}
-	errorBatch = cuFileBatchIOCancel(batch_id);
-	if(errorBatch.err != 0) {
-		std::cerr << "Error in IO Batch Cancel" << std::endl;
-		goto out4;
-	}
-	std::cout << "Batch IO Canceled" << std::endl;
+	std::cout << "Batch IO Submittedn" << std::endl;
 	
-	memset(io_batch_events, 0, sizeof(*io_batch_events));
-	nr = batch_size;
-	errorBatch = cuFileBatchIOGetStatus(batch_id, batch_size, &nr, io_batch_events, NULL);	
-	if(errorBatch.err != 0) {
-		std::cerr << "Error in IO Batch Get Status" << std::endl;
-		goto out4;
+	while(num_completed != batch_size) {
+		memset(io_batch_events, 0, sizeof(*io_batch_events));
+		nr = batch_size;	
+		errorBatch = cuFileBatchIOGetStatus(batch_id, batch_size, &nr, io_batch_events, NULL);	
+		if(errorBatch.err != 0) {
+			std::cerr << "Error in IO Batch Get Status" << std::endl;
+			ret = -1;
+			goto out4;
+		}
+		std::cout << "Got events " << nr << std::endl;
+		num_completed += nr;
+		for(unsigned j = 0; j < nr; j++) {
+			std::cout << "Completed  IO: index" << j << ", size:" << io_batch_params[j].u.batch.size << std::endl;
+		}
 	}
+	std::cout << "Batch IO Get status done got completetions for events " << nr << std::endl;
 out4:
 	cuFileBatchIODestroy(batch_id);
 
@@ -169,18 +195,23 @@ out4:
 	std::cout << "deregistering device memory" << std::endl;
 out3:
 	// deregister the device memory
+	// Only even indexed entries were using registered buffers.
 	for(i = 0; i < batch_size; i++) {
-		status = cuFileBufDeregister(devPtr[i]);
-		if (status.err != CU_FILE_SUCCESS) {
-			ret = -1;
-			std::cerr << "buffer deregister failed:"
-				<< cuFileGetErrorString(status) << std::endl;
+		if ((i % 2) == 0) {
+			status = cuFileBufDeregister(devPtr[i]);
+			if (status.err != CU_FILE_SUCCESS) {
+				ret = -1;
+				std::cerr << "buffer deregister failed:"
+					<< cuFileGetErrorString(status) << std::endl;
+			}
 		}
 	}
+	std::cout << "cuFile BufDeregsiter Done" << std::endl;
 out2:
 	for(i = 0; i < batch_size; i++) {
 		check_cudaruntimecall(cudaFree(devPtr[i]));
 	}
+	std::cout << "cudaFree Done" << std::endl;
 out1:
 	// close file
 	for(i = 0; i < batch_size; i++) {
@@ -189,13 +220,14 @@ out1:
 			close(fd[i]);
 		}
 	}
+	std::cout << "cuFileHandleDeregister Done" << std::endl;
 
 	status = cuFileDriverClose();
+	std::cout << "cuFileDriverClose Done" << std::endl;
 	if (status.err != CU_FILE_SUCCESS) {
 		ret = -1;
 		std::cerr << "cufile driver close failed:"
 			<< cuFileGetErrorString(status) << std::endl;
 	}
-	ret = 0;
 	return ret;
 }

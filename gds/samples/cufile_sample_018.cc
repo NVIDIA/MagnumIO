@@ -22,7 +22,7 @@
 #include <cuda_runtime.h>
 
 #include "cufile.h"
-
+#include "cufile_sample_utils.h"
 /*
  This sample shows the usage of fcntl locks with GDS for unaligned writes to achieve atomic transactions.
 */
@@ -36,15 +36,6 @@
 #define ALIGN_UP(x, align_to)   (((x) + ((align_to)-1)) & ~((align_to)-1))
 #define ALIGN_DOWN(x, a)        ((unsigned long)(x) & ~(((unsigned long)(a)) - 1))
 #define MAX_RETRY 3
-
-//Macro for checking cuda errors following a cuda launch or api call
-#define cudaCheckError() {                                          \
-        cudaError_t e=cudaGetLastError();                                 \
-        if(e!=cudaSuccess) {                                              \
-            printf("Cuda failure %s:%d: '%s'\n",__FILE__,__LINE__,cudaGetErrorString(e));           \
-            exit(EXIT_FAILURE);                                           \
-        }                                                                 \
-    }
 
 typedef struct thread_data
 {
@@ -61,8 +52,7 @@ static void *read_thread_fn(void *data)
 	thread_data_t *t = (thread_data_t *)data;
 	int cnt;
 
-	cudaSetDevice(0);
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
 
 			   /* l_type   l_whence  l_start  l_len    l_pid  */
 	struct flock fl = { F_RDLCK, SEEK_SET,         0,       0,     0 };
@@ -124,8 +114,7 @@ static void *write_thread_fn(void *data)
 	 * we set it explicitly. However, threads have to ensure that they are in
 	 * same cuda context as devPtr was allocated.
 	 */
-	cudaSetDevice(0);
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
 
 			   /* l_type   l_whence  l_start  l_len    l_pid  */
 	struct flock fl = { F_WRLCK, SEEK_SET,         0,       0,     0 };
@@ -214,17 +203,10 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 
-	cudaSetDevice(0);
-	cudaCheckError();
-
-	cudaMalloc(&devPtr, KB(4));
-	cudaCheckError();
-
-	cudaMemset(devPtr, 0xab, KB(4));
-	cudaCheckError();
-
-	cudaStreamSynchronize(0);
-	cudaCheckError();
+	check_cudaruntimecall(cudaSetDevice(0));
+	check_cudaruntimecall(cudaMalloc(&devPtr, KB(4)));
+	check_cudaruntimecall(cudaMemset(devPtr, 0xab, KB(4)));
+	check_cudaruntimecall(cudaStreamSynchronize(0));
 	
 	// Thread 0 will write to file from offset 10 - write size 100 bytes
 	// This is an unaligned write as offset is not 4K aligned. GDS will
@@ -270,7 +252,7 @@ int main(int argc, char **argv) {
 
 	cuFileHandleDeregister(cfr_handle);
 	close(fd);
-	cudaFree(devPtr);
+	check_cudaruntimecall(cudaFree(devPtr));
 
 	return 0;
 }

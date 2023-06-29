@@ -93,11 +93,19 @@ vector<CUdevice> getBackingDevices(CUdevice cuDevice)
     return backingDevices;
 }
 
+#define MAX_TEST_LIMIT 192 * 1024 *1024
 // Host code
 int main(int argc, char **argv)
 {
     CUdevice cuDevice;
     const char *TESTFILE;
+
+    if(argc < 2) {
+            std::cerr << argv[0] << " <filepath>"<< std::endl;
+            exit(EXIT_FAILURE);
+    }
+
+    TESTFILE = argv[1];
 
     printf("Using thrust::find()\n");
     size_t N = 28835840 * 2;
@@ -135,8 +143,10 @@ int main(int argc, char **argv)
     backingDevices.push_back(getBackingDevices(cuDevice));
 
     N = N * backingDevices[0].size();
+    if (N > (MAX_TEST_LIMIT / sizeof (int))) {
+	    N = MAX_TEST_LIMIT / sizeof(int);
+    }
     size = N * sizeof(int);
-
     printf("total number of elements in each vector :%zu \n", N);
     printf("size of sysmem vector in bytes :%ld \n", size);
 
@@ -161,13 +171,6 @@ int main(int argc, char **argv)
 
     // Copy input vector from host memory to device memory
     dA = h_vec;
-
-    if(argc < 2) {
-            std::cerr << argv[0] << " <filepath> "<< std::endl;
-            exit(EXIT_FAILURE);
-    }
-
-    TESTFILE = argv[1];
 
     // Write device vector to file
     dA.write_to_file(TESTFILE);
