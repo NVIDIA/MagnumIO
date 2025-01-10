@@ -25,28 +25,38 @@
 """
 
 import sys
-import kvikio
 import cupy
+import kvikio
 
-WRITE_SIZE = (128 * 1024) # 128 KB
-WRITE_OFFSET = (4 * 1024) # 4 KB
+# Constants
+FILE_SIZE_BYTES = (128 * 1024) # 128 KB
+FILE_OFFSET_BYTES = (4 * 1024) # 4 KB
 
 def main(path):
-    print("Creating data vector of size " + str(WRITE_SIZE) + " bytes")
-    a = cupy.full((WRITE_SIZE,), int("ab", 16), dtype=cupy.uint8)
+    """
+    Writes data to a file using KvikIO.
+
+    Args:
+        path (str): The path to the file to write to.
+    """
+    print("Creating data vector of size " + str(FILE_SIZE_BYTES) + " bytes")
+    a = cupy.full((FILE_SIZE_BYTES,), int("ab", 16), dtype=cupy.uint8)
     print("Opening file: " + path)
     with kvikio.CuFile(path, "w") as f:
         print("Writing data vector to file")
-        # write is a blocking call implemented by calling pwrite and waiting for the IO to complete before returning to the caller.
-        # like pwrite, it uses an internal threadpool on top of the cufile library. It supports host and device memory.
+        # write is a blocking call implemented by calling pwrite and waiting for 
+        # the IO to complete before returning to the caller.
+        # like pwrite, it uses an internal threadpool on top of the cufile library.
+        # It supports host and device memory.
         ret = f.write(a)
         print("Bytes written: " + str(ret))
 
 
         print("Writing second data vector to file, offset by 4KB")
-        # raw_write is a blocking call like write. It is implemented at a lower level than write and does not include an internal
-        # threadpool on top of the cufile library. 
-        ret = f.raw_write(a, WRITE_SIZE, WRITE_SIZE + WRITE_OFFSET)
+        # raw_write is a blocking call like write. It is implemented at a lower 
+        # level than write and does not include an internal threadpool on top of 
+        # the cufile library. 
+        ret = f.raw_write(a, FILE_SIZE_BYTES, FILE_SIZE_BYTES + FILE_OFFSET_BYTES)
         print("Bytes written: " + str(ret))
 
 if __name__ == "__main__":

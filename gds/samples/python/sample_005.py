@@ -18,24 +18,34 @@
  data integrity. All file openings and closures are handled with context managers.
 """
 
-import sys
 import os
-import kvikio
+import sys
 import cupy
+import kvikio
 
-DATA_SIZE = (128 * 1024) # 128 KB
-OFFSET = (64 * 1024) # 64 KB
+# Constants
+DATA_SIZE_BYTES = (128 * 1024) # 128 KB
+DEVICE_OFFSET_BYTES = (64 * 1024) # 64 KB
 
 def main(read_path, write_path):
+    """
+    Reads data from one file and writes a portion of it to another file using KvikIO.
+
+    The write operation uses a device offset to write only the portion of the data
+    following the offset in the buffer to the file.
+
+    Args:
+        read_path (str): The path to the file to read from.
+        write_path (str): The path to the file to write to.
+    """
     print("Creating random test data...")
-    test_data = os.urandom(DATA_SIZE)
+    test_data = os.urandom(DATA_SIZE_BYTES)
     print("Writing random data using standard calls to file: " + read_path)
     with open(read_path, 'wb') as f:
-        f = open(read_path, 'wb')
         f.write(test_data)
 
     print("Create data vector on GPU to store data")
-    buf = cupy.empty(DATA_SIZE, dtype=cupy.uint8)
+    buf = cupy.empty(DATA_SIZE_BYTES, dtype=cupy.uint8)
 
     print("Opening file for read: " + read_path)
     with kvikio.CuFile(read_path, "r") as fr:
@@ -45,14 +55,13 @@ def main(read_path, write_path):
 
     print("Opening file for write: " + write_path)
     with kvikio.CuFile(write_path, "w") as fw:
-        fw = kvikio.CuFile(write_path, "w")
         print("Write data from device memory to separate file: " + write_path)
-        ret = fw.raw_write(buf, DATA_SIZE-OFFSET, 0, OFFSET)
+        ret = fw.raw_write(buf, DATA_SIZE_BYTES-DEVICE_OFFSET_BYTES, 0, DEVICE_OFFSET_BYTES)
         print("Bytes written: " + str(ret))
 
     print("Confirm written data in " + write_path + " matches corresponding data from " + read_path)
     with open(read_path, 'rb') as f1, open(write_path, 'rb') as f2:
-        f1.seek(OFFSET)
+        f1.seek(DEVICE_OFFSET_BYTES)
         f1_data = f1.read()
         f2_data = f2.read()
         if f1_data == f2_data:

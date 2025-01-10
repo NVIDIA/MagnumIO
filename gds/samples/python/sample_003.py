@@ -17,24 +17,33 @@
  data integrity.
 """
 
-import sys
-import os
-import kvikio
-import cupy
 import filecmp
+import os
+import sys
+import cupy
+import kvikio
 
-DATA_SIZE = (128 * 1024) # 128 KB
+# Constants
+DATA_SIZE_BYTES = (128 * 1024) # 128 KB
 
 def main(read_path, write_path):
+    """
+    Reads random data from one file and writes it to another file using KvikIO.
+    The files are compared to confirm data integrity during the read and write.
+
+    Args:
+        read_path (str): The path to the file to read from.
+        write_path (str): The path to the file to write to.
+    """
     print("Creating random test data...")
-    test_data = os.urandom(DATA_SIZE)
+    test_data = os.urandom(DATA_SIZE_BYTES)
     print("Writing random data using standard calls to file: " + read_path)
     f = open(read_path, 'wb')
     f.write(test_data)
     f.close()
 
     print("Create data vector on GPU to store data")
-    buf = cupy.empty(DATA_SIZE, dtype=cupy.uint8)
+    buf = cupy.empty(DATA_SIZE_BYTES, dtype=cupy.uint8)
 
     print("Opening file for read: " + read_path)
     fr = kvikio.CuFile(read_path, "r")
