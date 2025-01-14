@@ -10,7 +10,7 @@
 """
  Sample KvikIO write test.
 
- This writes data from GPU memory to a file using write and raw_write.
+ This test writes data from GPU memory to a file using write and raw_write.
  For verification, input data has a pattern.
  User can verify the output file-data after write using
  hexdump -C <filepath>
@@ -28,37 +28,44 @@ import cupy
 import kvikio
 
 # Constants
-FILE_SIZE_BYTES = (128 * 1024) # 128 KB
+FILE_SIZE_BYTES   = (128 * 1024) # 128 KB
 FILE_OFFSET_BYTES = (4 * 1024) # 4 KB
 
-def main(path):
+def main(path: str) -> None:
     """
     Writes data to a file using KvikIO.
 
     Args:
         path (str): The path to the file to write to.
     """
-    print("Opening file: " + path)
-    f = kvikio.CuFile(path, "w")
-    print("Creating data vector of size " + str(FILE_SIZE_BYTES) + " bytes")
-    a = cupy.full((FILE_SIZE_BYTES,), int("ab", 16), dtype=cupy.uint8)
+    
+    print(f"Opening file: {path}")
+    file_writer = kvikio.CuFile(path, "w")
+    print(f"Creating data vector of size {FILE_SIZE_BYTES} bytes")
+    buf = cupy.full((FILE_SIZE_BYTES,), int("ab", 16), dtype=cupy.uint8)
     print("Writing data vector to file")
     # write is a blocking call implemented by calling pwrite and waiting for 
     # the IO to complete before returning to the caller.
     # like pwrite, it uses an internal threadpool on top of the cufile library.
     # It supports host and device memory.
-    ret = f.write(a)
-    print("Bytes written: " + str(ret))
+    ret = file_writer.write(buf)
+    if ret < 0:
+        print(f"Error writing file: {ret}")
+        return
+    print(f"Bytes written: {ret}")
 
-    print("Writing second data vector to file, offset by 4KB")
+    print(f"Writing second data vector to file, offset by {FILE_OFFSET_BYTES} bytes")
     # raw_write is a blocking call like write. It is implemented at a lower 
     # level than write and does not include an internal threadpool on top of 
     # the cufile library. 
-    ret = f.raw_write(a, FILE_SIZE_BYTES, FILE_SIZE_BYTES + FILE_OFFSET_BYTES)
-    print("Bytes written: " + str(ret))
+    ret = file_writer.raw_write(buf, FILE_SIZE_BYTES, FILE_SIZE_BYTES + FILE_OFFSET_BYTES)
+    if ret < 0:
+        print(f"Error writing file: {ret}")
+        return
+    print(f"Bytes written: {ret}")
 
     print("Closing file")
-    f.close()
+    file_writer.close()
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
