@@ -52,18 +52,12 @@ def main(read_path: str, write_path: str) -> None:
     with kvikio.CuFile(read_path, "r") as file_reader:
         print(f"Read data to device memory from file: {read_path}")
         ret = file_reader.read(buf)
-        if ret < 0:
-            print(f"Error reading file: {ret}")
-            return
         print(f"Bytes read: {ret}")
 
     print(f"Opening file for write: {write_path}")
     with kvikio.CuFile(write_path, "w") as file_writer:
         print(f"Write data from device memory to separate file: {write_path}")
         ret = file_writer.raw_write(buf, DATA_SIZE_BYTES-DEVICE_OFFSET_BYTES, 0, DEVICE_OFFSET_BYTES)
-        if ret < 0:
-            print(f"Error writing file: {ret}")
-            return
         print(f"Bytes written: {ret}")
 
     print(f"Confirm written data in {write_path} matches corresponding data from {read_path}")

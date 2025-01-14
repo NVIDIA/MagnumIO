@@ -50,9 +50,6 @@ def main(read_path: str, write_path: str) -> None:
     file_reader = kvikio.CuFile(read_path, "r")
     print(f"Read data to device memory from file: {read_path}")
     ret = file_reader.read(buf)
-    if ret < 0:
-        print(f"Error reading file: {ret}")
-        return
     print(f"Bytes read: {ret}")
     print("Closing read file")
     file_reader.close()
@@ -61,9 +58,6 @@ def main(read_path: str, write_path: str) -> None:
     file_writer = kvikio.CuFile(write_path, "w")
     print(f"Write data from device memory to separate file: {write_path}")
     ret = file_writer.write(buf)
-    if ret < 0:
-        print(f"Error writing file: {ret}")
-        return
     print(f"Bytes written: {ret}")
     print("Closing write file")
     file_writer.close()

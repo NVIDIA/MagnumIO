@@ -60,9 +60,6 @@ def main(read_path: str, write_path: str) -> None:
             iterations += 1
             read_size = min(DATA_SIZE_BYTES-bytes_read, CHUNK_SIZE_BYTES)
             ret = file_reader.raw_read(buf, read_size, file_offset, device_offset)
-            if ret < 0:
-                print(f"Error during iteration {iterations}, exiting")
-                return
             bytes_read += ret
             file_offset += ret
             device_offset += ret
@@ -73,9 +70,6 @@ def main(read_path: str, write_path: str) -> None:
     with kvikio.CuFile(write_path, "w") as file_writer:
         print(f"Write data from device memory to separate file: {write_path}")
         ret = file_writer.write(buf)
-        if ret < 0:
-            print(f"Error writing file: {ret}")
-            return
         print(f"Bytes written: {ret}")
 
     print(f"Confirm written data in {write_path} matches data from {read_path}")

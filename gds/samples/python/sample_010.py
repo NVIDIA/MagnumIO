@@ -55,9 +55,6 @@ def main(read_path: str, write_path: str) -> None:
         print("Wait on future for completion of read")
         # Note: Getting the result of the future blocks on the completion of the IO
         ret = read_future.get()
-        if ret < 0:
-            print(f"Error reading file: {ret}")
-            return
         print(f"Bytes read: {ret}")
         # Note: The future must be utilized before leaving the scope of the 
         # context manager
@@ -71,9 +68,6 @@ def main(read_path: str, write_path: str) -> None:
         print("Wait on future for completion of write")
         # Note: Getting the result of the future blocks on the completion of the IO
         ret = write_future.get()
-        if ret < 0:
-            print(f"Error writing file: {ret}")
-            return
         print(f"Bytes written: {ret}")
         # Note: The future must be utilized before leaving the scope of the 
         # context manager

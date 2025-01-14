@@ -49,9 +49,6 @@ def main(path: str) -> None:
     # like pwrite, it uses an internal threadpool on top of the cufile library.
     # It supports host and device memory.
     ret = file_writer.write(buf)
-    if ret < 0:
-        print(f"Error writing file: {ret}")
-        return
     print(f"Bytes written: {ret}")
 
     print(f"Writing second data vector to file, offset by {FILE_OFFSET_BYTES} bytes")
@@ -59,9 +56,6 @@ def main(path: str) -> None:
     # level than write and does not include an internal threadpool on top of 
     # the cufile library. 
     ret = file_writer.raw_write(buf, FILE_SIZE_BYTES, FILE_SIZE_BYTES + FILE_OFFSET_BYTES)
-    if ret < 0:
-        print(f"Error writing file: {ret}")
-        return
     print(f"Bytes written: {ret}")
 
     print("Closing file")
