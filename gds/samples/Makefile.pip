@@ -30,38 +30,48 @@
 ################################################################################
 #
 # Makefile project only supported on Linux Platforms)
+# Updated to use pip-installed CUDA 13.0 libraries
 #
 ################################################################################
 
-# Common includes and paths for CUDA
+# Get the virtual environment path
+VENV_PATH := $(shell python -c "import sys; print(sys.prefix)")
+CUDA_PIP_PATH := $(VENV_PATH)/lib/python$(shell python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")/site-packages/nvidia/cu13
+
+# Common includes and paths for CUDA (using pip-installed libraries)
+# Pip packages use unified directory structure across all architectures
 ARCH ?= $(shell uname -m)
-CUDA_PATH   := /usr/local/cuda
-ifeq ($(ARCH),aarch64)
-	CUFILE_PATH ?= /usr/local/cuda/targets/sbsa-linux/lib/
-	CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/sbsa-linux/include/
-else
-	CUFILE_PATH ?= /usr/local/cuda/targets/x86_64-linux/lib/
-	CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/x86_64-linux/include/
-endif
+CUDA_PATH   := $(CUDA_PIP_PATH)
+CUFILE_PATH ?= $(CUDA_PIP_PATH)/lib/
+CUFILE_INCLUDE_PATH ?= $(CUDA_PIP_PATH)/include/
+
+# Compiler flags
 CXXFLAGS    := -Wall
 CXXFLAGS    += -I $(CUDA_PATH)/include/ 
 CXXFLAGS    += -I $(CUFILE_INCLUDE_PATH)
 CXXFLAGS    += -I ./include/
+
 ###########################
 # Enable the following line for code coverage
 ifneq ($(CONFIG_CODE_COVERAGE),)
 CXXFLAGS    += -ftest-coverage -fprofile-arcs
 endif
-CXXFLAGS 	+= -std=c++17
+CXXFLAGS += -std=c++17
 ###########################
-CUDART_STATIC := -Bstatic -L $(CUDA_PATH)/lib64/ -lcudart_static -lrt -lpthread -ldl
-LDFLAGS       :=  $(CUFILE_LIB) $(CUDART_STATIC) -lcrypto -lssl -g
-CUFILE_LIB    := -L $(CUFILE_PATH) -lcufile
-CUFILE_LIB_STATIC  := -L $(CUFILE_PATH) -lcufile_static
-LDFLAGS       :=  $(CUFILE_LIB) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
-LDFLAGS_STATIC     :=  $(CUFILE_LIB_STATIC) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
+
+# Library paths and flags (using pip-installed libraries)
+# Note: pip packages only provide versioned libraries (e.g., libcufile.so.0)
+# You need to create a symlink: ln -s libcufile.so.0 libcufile.so
+CUDART_STATIC := -Bstatic -L $(CUDA_PATH)/lib/ -lcudart_static -lrt -lpthread -ldl
+CUFILE_LIB  := -L $(CUFILE_PATH) -lcufile
+
+# Updated LDFLAGS to use pip libraries
+LDFLAGS     :=  $(CUFILE_LIB) -L $(CUDA_PATH)/lib/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
+
 INSTALL_GDSSAMPLES_PREFIX = /usr/local/gds/samples
-NVCC          := $(CUDA_PATH)//bin/nvcc
+
+# Use pip-installed nvcc
+NVCC          := $(CUDA_PATH)/bin/nvcc
 
 ################################################################################
 CC:=/usr/bin/g++
@@ -80,37 +90,77 @@ common_cc := $(wildcard common/*.cc)
 commonobjs := $(patsubst common/%.cc,common/%.o,$(common_cc))
 samples = $(filter-out common/%.cc, $(wildcard */*.cc))
 cusamples = $(wildcard */*.cu)
-objs = $(samples:.cc=) $(samples:.cc=_static)
+objs = $(samples:.cc=)
 cuobjs = $(cusamples:.cu=) vectorAdd.o
 build: $(commonobjs) $(objs) $(cuobjs)
 
+# Determine NVCC version from pip-installed nvcc
+NVCC_VERSION := $(shell $(NVCC) --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//' || echo "0.0")
+NVCC_MAJOR := $(shell echo $(NVCC_VERSION) | cut -d. -f1)
+NVCC_MINOR := $(shell echo $(NVCC_VERSION) | cut -d. -f2)
+
+# Set CUDA architectures - matching current Makefile
 CUDA_ARCH = -gencode=arch=compute_75,code=sm_75 \
-			-gencode=arch=compute_80,code=sm_80 \
-			-gencode=arch=compute_86,code=sm_86 \
-			-gencode=arch=compute_87,code=sm_87 \
-			-gencode=arch=compute_89,code=sm_89 \
-			-gencode=arch=compute_90,code=sm_90 \
-			-gencode=arch=compute_90,code=compute_90						
+            -gencode=arch=compute_80,code=sm_80 \
+            -gencode=arch=compute_86,code=sm_86 \
+            -gencode=arch=compute_87,code=sm_87 \
+            -gencode=arch=compute_89,code=sm_89 \
+            -gencode=arch=compute_90,code=sm_90 \
+            -gencode=arch=compute_90,code=compute_90
 
 vectorAdd.o : vectorAdd.cu
 	$(NVCC) $(INCLUDES) --cudadevrt static --cudart static \
-		$(CUDA_ARCH)  --ptxas-options=-v --compiler-options \
+		$(CUDA_ARCH) --ptxas-options=-v --compiler-options \
 		--compile --lib $< -o $@
 
+# Build common object files
+common/%.o: common/%.cc
+	$(CC) $(INCLUDES) $(CXXFLAGS) -c $< -o $@
+
+# Build rules for all samples (dynamic linking only)
 %: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h vectorAdd.o $(commonobjs)
-	$(CC) $(INCLUDES) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
-%_static: %.cc $(CUFILE_INCLUDE_PATH)/cufile.h vectorAdd.o $(commonobjs)
-	$(CC)  $(INCLUDES) $(CXXFLAGS) $^ -o $@ $(LDFLAGS_STATIC)
-	
+	$(CC) $(INCLUDES) $(CXXFLAGS) $< $(commonobjs) vectorAdd.o -o $@ $(LDFLAGS)
+
+# Special rule for CUDA sample (memmap_thrust)
 5_cuFile_MemMap/memmap_thrust: 5_cuFile_MemMap/memmap_thrust.cu $(commonobjs)
 	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudadevrt static --cudart static $(CUDA_ARCH) $^ -o $@ $(CUFILE_LIB) -lcuda
-	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $(CUDA_ARCH) $^ -o $@_static $(CUFILE_LIB_STATIC) -lcuda
 
 install:
 	cp -r vectorAdd.cu Makefile README.md 1_cuFile_Basics/ 2_cuFile_Multithreaded/ 3_cuFile_Batch/ 4_cuFile_Async/ 5_cuFile_MemMap/ include/ common/ $(INSTALL_GDSSAMPLES_PREFIX)/
 
 clean:
-	rm -f $(objs) $(cuobjs) $(cusamples:.cu=_static)
+	find . -type f -executable -delete
 	rm -f *.o common/*.o cufile.log
 
-.PHONY : build install clean
+# Debug target to show detected paths
+debug-paths:
+	@echo "=== Virtual Environment ==="
+	@echo "VENV_PATH: $(VENV_PATH)"
+	@echo ""
+	@echo "=== CUDA Pip Paths ==="
+	@echo "CUDA_PIP_PATH: $(CUDA_PIP_PATH)"
+	@echo "CUDA_PATH: $(CUDA_PATH)"
+	@echo "CUFILE_PATH: $(CUFILE_PATH)"
+	@echo "CUFILE_INCLUDE_PATH: $(CUFILE_INCLUDE_PATH)"
+	@echo ""
+	@echo "=== Compiler and Version ==="
+	@echo "NVCC: $(NVCC)"
+	@echo "NVCC_VERSION: $(NVCC_VERSION)"
+	@echo ""
+	@echo "=== Architecture ==="
+	@echo "ARCH: $(ARCH)"
+	@echo "CUDA_ARCH: $(CUDA_ARCH)"
+	@echo ""
+	@echo "=== Build Targets ==="
+	@echo "Common objects: $(commonobjs)"
+	@echo "Sample count: $(words $(samples))"
+	@echo "CUDA sample count: $(words $(cusamples))"
+	@echo ""
+	@echo "=== File Checks ==="
+	@ls -la $(NVCC) 2>/dev/null || echo "❌ NVCC not found at $(NVCC)"
+	@ls -la $(CUFILE_INCLUDE_PATH)/cufile.h 2>/dev/null || echo "❌ cufile.h not found at $(CUFILE_INCLUDE_PATH)/cufile.h"
+	@ls -la $(CUFILE_PATH)/libcufile.so 2>/dev/null && echo "✓ libcufile.so symlink exists" || echo "❌ libcufile.so symlink missing - create with: cd $(CUFILE_PATH) && ln -s libcufile.so.0 libcufile.so"
+	@ls -la $(CUFILE_PATH)/libcufile.so.0 2>/dev/null && echo "✓ libcufile.so.0 exists" || echo "❌ libcufile.so.0 not found"
+
+.PHONY : build install clean debug-paths
+

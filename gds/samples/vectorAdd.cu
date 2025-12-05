@@ -1,4 +1,4 @@
-/* Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+/* Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/**
+/*
  * Vector addition: C = A + B.
  *
  * This sample is a very basic sample that implements element by element
@@ -33,15 +33,12 @@
  * of the programming guide with some additions like error checking.
  */
 
-#include <stdio.h>
 #include <cuda.h>
 #include <assert.h>
 
-
 #ifdef __cplusplus
 extern "C" {
-extern void vectorAdd(const float *A, const float *B, float *C,
-                          int numElements);
+	extern void vectorAdd(const float *A, const float *B, float *C, int numElements);
 }
 #endif
 
@@ -51,27 +48,23 @@ extern void vectorAdd(const float *A, const float *B, float *C,
  * Computes the vector addition of A and B into C. The 3 vectors have the same
  * number of elements numElements.
  */
-extern "C"  __global__ void vectorAdd_kernel(const float *A, const float *B, float *C,
-                          int numElements) {
-  int i = blockDim.x * blockIdx.x + threadIdx.x;
+extern "C"  __global__ void vectorAdd_kernel(const float *A, const float *B, float *C, int numElements) {
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (i < numElements) {
-    C[i] = A[i] + B[i] + 0.0f;
-  }
+	if (i < numElements) {
+		C[i] = A[i] + B[i] + 0.0f;
+	}
 }
 
-void vectorAdd(const float *d_A, const float *d_B, float *d_C,
-                          int numElements) {
-    // This is the new CUDA 4.0 API for Kernel Parameter Passing and Kernel Launch (simpler method)
+void vectorAdd(const float *d_A, const float *d_B, float *d_C, int numElements) {
+	// This is the new CUDA 4.0 API for Kernel Parameter Passing and Kernel Launch (simpler method)
+	// Grid/Block configuration
+	int threadsPerBlock = 256;
+	int blocksPerGrid   = (numElements + threadsPerBlock - 1) / threadsPerBlock;
+	dim3 grid(blocksPerGrid, 1, 1);
+	dim3 block(threadsPerBlock, 1, 1);
 
-    // Grid/Block configuration
-    int threadsPerBlock = 256;
-    int blocksPerGrid   = (numElements + threadsPerBlock - 1) / threadsPerBlock;
-    dim3 grid(blocksPerGrid, 1, 1);
-    dim3 block(threadsPerBlock, 1, 1);
-
-    // Launch the CUDA kernel
-    vectorAdd_kernel<<< grid, block, 0 >>>(d_A, d_B, d_C, numElements);
-    cudaStreamSynchronize(0);
-    return;
+	// Launch the CUDA kernel
+	vectorAdd_kernel<<< grid, block, 0 >>>(d_A, d_B, d_C, numElements);
+	cudaStreamSynchronize(0);
 }

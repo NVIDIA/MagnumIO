@@ -1,0 +1,24 @@
+-i https://pypi.org/simple/
+nvidia-cublas==13.0.2.14
+nvidia-cuda-cupti==13.0.85
+nvidia-cuda-nvcc==13.0.88
+nvidia-cuda-nvrtc==13.0.88
+nvidia-cuda-runtime==13.0.88
+nvidia-cuda-sanitizer-api==13.0.85
+nvidia-cufft==12.0.0.61
+nvidia-curand==10.4.0.35
+nvidia-cusolver==12.0.4.66
+nvidia-cusparse==12.6.3.3
+nvidia-npp==13.0.1.2
+nvidia-nvjpeg==13.0.1.86
+nvidia-nvml-dev==13.0.87
+nvidia-nvtx==13.0.85
+nvidia-cuda-profiler-api==13.0.85
+nvidia-cuda-cccl==13.0.85
+nvidia-nvjitlink==13.0.88
+nvidia-cuda-opencl==13.0.85
+nvidia-cufile==1.15.1.6
+nvidia-nvptxcompiler==13.0.88
+nvidia-nvvm==13.0.88
+nvidia-cuda-crt==13.0.88
+
