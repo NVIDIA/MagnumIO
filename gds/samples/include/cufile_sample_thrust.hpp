@@ -23,6 +23,9 @@
 #include <thrust/device_vector.h>
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
+
+// includes, libcudacxx
+#include <cuda/std/iterator>
 #include "cufile_sample_utils.hpp"
 #include "cufile_sample_memmap.hpp"
 
@@ -39,9 +42,9 @@ __device__ long long int d_index = -1;
 template<typename T>
 __global__ void thrust_concurrent_find_kernel(T* begin, T value, size_t numElements, int d) {
 	thrust::device_ptr<T> iter;
-	iter = thrust::find(thrust::device, thrust::device_pointer_cast(begin), thrust::device_pointer_cast(begin+numElements-1), value);
+	iter = thrust::find(thrust::device, thrust::device_pointer_cast(begin), thrust::device_pointer_cast(begin + numElements - 1), value);
 	if (*iter == value) {
-		d_index = thrust::distance(thrust::device_pointer_cast(begin), iter);
+		d_index = thrust::raw_pointer_cast(iter) - begin;
 		d_index += d*numElements;
 	}
 }
@@ -56,15 +59,15 @@ __global__ void thrust_concurrent_find_kernel(T* begin, T value, size_t numEleme
 ////////////////////////////////////////////////////////////////////////////
 template <typename T>
 int thrust_concurrent_find(thrust::device_ptr<T> begin, thrust::device_ptr<T> end, T value, int num_devices) {
-	size_t num_elements = (thrust::distance(begin, end))/num_devices;
+	size_t num_elements = (thrust::raw_pointer_cast(end) - thrust::raw_pointer_cast(begin)) / num_devices;
 
 	cudaStream_t streams[num_devices];
-	for(int i=0; i<num_devices; i++) {
+	for (int i = 0; i < num_devices; i++) {
 		check_cudaruntimecall(cudaSetDevice(i));
 		check_cudaruntimecall(cudaStreamCreateWithFlags(&streams[i], cudaStreamNonBlocking));
 	}
 
-	for (int i=0; i<num_devices; i++) {
+	for (int i = 0; i < num_devices; i++) {
 		check_cudaruntimecall(cudaSetDevice(i));
 		thrust_concurrent_find_kernel<T><<< 1, 1, 0, streams[i]>>>((T*) thrust::raw_pointer_cast(begin+i*num_elements), value, num_elements, i);
 	}
