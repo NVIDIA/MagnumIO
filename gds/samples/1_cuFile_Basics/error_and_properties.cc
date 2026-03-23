@@ -21,8 +21,8 @@
  * PASS: cuFile error status: GPUDirect Storage not supported on current platform
  * ...
  * cuFileDriver Get/SetProperties Usage
- * cuFile driver properties before using setters:
- *   Poll mode bitmask: 00000010
+ * cuFile driver properties after using setters:
+ *   Poll mode bitmask: 00000011
  * ...
  */
 
@@ -45,11 +45,12 @@ static constexpr size_t POLL_THRESH_KB = 32768;
 // Limit application to use a portion of GPU memory for IO usage
 static constexpr size_t LIMIT_BAR_USAGE_KB = 512;
 
-// For internal use, max mmaped buffer size
-static constexpr size_t LIMIT_DIO_SIZE_KB = 64;
-
-// For internal use, allocation of internal buffers
-static constexpr size_t LIMIT_CACHE_SIZE_KB = 64;
+// GPU Bounce Buffer Slab Configuration
+// Defines multiple buffer sizes for flexible memory allocation
+static constexpr size_t SLAB_SIZES_KB[] = {4, 16, 64};
+static constexpr size_t SLAB_COUNTS[] = {4, 2, 1};
+static constexpr int NUM_SLABS = 3;
+// Total cache: 4*4 + 16*2 + 64*1 = 112 KB
 
 int main(void) {
 	CUfileError_t status = {CU_FILE_SUCCESS, CUDA_SUCCESS};
@@ -98,26 +99,6 @@ int main(void) {
 	// Reset the status for cuFileDriver Get/SetProperties
 	std::cout << std::endl << "cuFileDriver Get/SetProperties Usage" << std::endl;
 
-	status = cuFileDriverOpen();
-	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cufile driver open error "
-			<< cuFileGetErrorString(status) << std::endl;
-		return EXIT_FAILURE;
-	}
-
-	status = cuFileDriverGetProperties(&props);
-	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cufile driver get properties failed "
-			<< cuFileGetErrorString(status) << std::endl;
-		return EXIT_FAILURE;
-	}
-	std::cout << "cuFile driver properties before using setters: " << std::endl;
-	std::cout << "  Poll mode bitmask: " << std::bitset<8>(props.nvfs.dcontrolflags) << std::endl;
-	std::cout << "  Poll threshold size: " << props.nvfs.poll_thresh_size << " bytes" << std::endl;
-	std::cout << "  Max pinned mem size: " << props.max_device_pinned_mem_size << " bytes" << std::endl;
-	std::cout << "  Max direct io size: " << props.nvfs.max_direct_io_size << " bytes" << std::endl;
-	std::cout << "  Max cache size: " << props.max_device_cache_size << " bytes" << std::endl;
-
 	status = cuFileDriverSetPollMode(true, POLL_THRESH_KB);
 	if (status.err != CU_FILE_SUCCESS) {
 		std::cerr << "cuFile driver set properties failed "
@@ -132,32 +113,59 @@ int main(void) {
 		return EXIT_FAILURE;
 	}
 
-	status = cuFileDriverSetMaxDirectIOSize(LIMIT_DIO_SIZE_KB);
+	status = cuFileSetParameterGpuBounceBufferSlabArray(SLAB_SIZES_KB, SLAB_COUNTS, NUM_SLABS);
 	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cuFile driver set properties failed "
+		std::cerr << "cuFile driver set slab configuration failed "
 			<< cuFileGetErrorString(status) << std::endl;
 		return EXIT_FAILURE;
 	}
 
-	status = cuFileDriverSetMaxCacheSize(LIMIT_CACHE_SIZE_KB);
+	status = cuFileDriverOpen();
 	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cuFile driver set properties failed "
+		std::cerr << "cufile driver open error "
 			<< cuFileGetErrorString(status) << std::endl;
 		return EXIT_FAILURE;
 	}
 
 	status = cuFileDriverGetProperties(&props);
 	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cuFile driver get properties failed "
+		std::cerr << "cufile driver get properties failed "
 			<< cuFileGetErrorString(status) << std::endl;
 		return EXIT_FAILURE;
 	}
 	std::cout << "cuFile driver properties after using setters: " << std::endl;
+	
+	// Verify poll mode is enabled
+	bool poll_mode_enabled = props.nvfs.dcontrolflags & (1 << CU_FILE_USE_POLL_MODE);
 	std::cout << "  Poll mode bitmask: " << std::bitset<8>(props.nvfs.dcontrolflags) << std::endl;
-	std::cout << "  Poll threshold size: " << props.nvfs.poll_thresh_size << " bytes" << std::endl;
-	std::cout << "  Max pinned mem size: " << props.max_device_pinned_mem_size << " bytes" << std::endl;
-	std::cout << "  Max direct io size: " << props.nvfs.max_direct_io_size << " bytes" << std::endl;
-	std::cout << "  Max cache size: " << props.max_device_cache_size << " bytes" << std::endl;
+	assert(poll_mode_enabled && "Poll mode should be enabled");
+	std::cout << "PASS: Poll mode enabled" << std::endl;
+	
+	// Verify poll threshold size matches what was set
+	std::cout << "  Poll threshold size: " << props.nvfs.poll_thresh_size << " KB" << std::endl;
+	assert(props.nvfs.poll_thresh_size == POLL_THRESH_KB && "Poll threshold should match set value");
+	std::cout << "PASS: Poll threshold size matches" << std::endl;
+	
+	// Verify max pinned mem size matches what was set
+	std::cout << "  Max pinned mem size: " << props.max_device_pinned_mem_size << " KB" << std::endl;
+	assert(props.max_device_pinned_mem_size == LIMIT_BAR_USAGE_KB && "Max pinned mem size should match set value");
+	std::cout << "PASS: Max pinned mem size matches" << std::endl;
+	
+	// Max direct io size and cache size depend on slab configuration
+	std::cout << "  Max direct io size: " << props.nvfs.max_direct_io_size << " KB" << std::endl;
+	// In slab mode, max_direct_io_size should be the largest slab size
+	size_t expected_max_direct_io = SLAB_SIZES_KB[NUM_SLABS - 1]; // Largest slab
+	assert(props.nvfs.max_direct_io_size == expected_max_direct_io && "Max direct IO size should match largest slab");
+	std::cout << "PASS: Max direct IO size matches largest slab" << std::endl;
+	
+	// Max cache size should be the sum of all slabs
+	std::cout << "  Max cache size: " << props.max_device_cache_size << " KB (sum of all slabs)" << std::endl;
+	size_t expected_cache_size = 0;
+	for (int i = 0; i < NUM_SLABS; i++) {
+		expected_cache_size += SLAB_SIZES_KB[i] * SLAB_COUNTS[i];
+	}
+	assert(props.max_device_cache_size == expected_cache_size && "Max cache size should match sum of all slabs");
+	std::cout << "PASS: Max cache size matches sum of slabs (" << expected_cache_size << " KB)" << std::endl;
 
 	status = cuFileDriverClose();
 	if (status.err != CU_FILE_SUCCESS) {

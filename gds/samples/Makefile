@@ -44,8 +44,8 @@ else
 	CUFILE_INCLUDE_PATH ?= /usr/local/cuda/targets/x86_64-linux/include/
 endif
 CXXFLAGS    := -Wall
-CXXFLAGS    += -I $(CUDA_PATH)/include/ 
 CXXFLAGS    += -I $(CUFILE_INCLUDE_PATH)
+CXXFLAGS    += -I $(CUDA_PATH)/include/ 
 CXXFLAGS    += -I ./include/
 ###########################
 # Enable the following line for code coverage

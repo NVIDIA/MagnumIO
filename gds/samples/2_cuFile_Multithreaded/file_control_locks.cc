@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
 
 	// Parse the GPU ID and open the file
 	gpuid = parseInt(argv[2]);
-	fd = open(argv[1], O_CREAT | O_RDWR | O_DIRECT);
+	fd = open(argv[1], O_CREAT | O_RDWR | O_DIRECT, 0664);
 	if (fd < 0) {
 		std::cerr << "Error: Unable to open file " << argv[1] << " with error "
 			<< cuFileGetErrorString(errno) << std::endl;

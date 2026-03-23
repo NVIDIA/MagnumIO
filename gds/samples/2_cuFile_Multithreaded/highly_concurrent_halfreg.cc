@@ -54,13 +54,24 @@
 static constexpr size_t NUM_THREADS = 64;
 static constexpr size_t NUM_GPU_BUFFERS = 4;
 static constexpr size_t CHUNK_SIZE = MiB(1);
-static constexpr size_t MAX_PINNED_MEM_SIZE = KiB(128);
-static constexpr size_t MAX_CACHE_SIZE = KiB(64);
+// API expects KB - convert bytes to KB
+// Calculate the maximum pinned memory size based on the number of registered buffers and the bounce buffer
+// There are NUM_THREADS/2 threads that will have NUM_GPU_BUFFERS registered buffers
+static constexpr size_t NUM_REGISTERED_BUFFERS = NUM_GPU_BUFFERS * NUM_THREADS/2;
+// The unregistered threads will share a single CHUNK_SIZE bounce buffer
+static constexpr size_t MAX_PINNED_MEM_SIZE = TOKiB((NUM_REGISTERED_BUFFERS + 1) * CHUNK_SIZE);  // 129 MiB = 132096 KB
+
+// GPU Bounce Buffer Slab Configuration
+// One 1 MB (1024 KB) slab to handle CHUNK_SIZE allocations
+static constexpr size_t SLAB_SIZES_KB[] = {1024};
+static constexpr size_t SLAB_COUNTS[] = {1};
+static constexpr int NUM_SLABS = 1;
+// Total cache: 1024 KB (1 MB)
 
 /*
  * Each thread allocates GPU memory and invokes cuFileBufRegister
  * on the entire buffer. This is done once; after registering or not 
- * registering the buffers, the thread reads data in chunks into their own set of 64
+ * registering the buffers, the thread reads data in chunks into their own set of 4
  * buffers. The GPU buffer acts as a streaming buffer, allowing data to be
  * directly DMA'ed into the registered memory. This approach is optimal for performance.
  */
@@ -185,17 +196,17 @@ int main(int argc, char *argv[]) {
 		});
 	};
 
-	// Set the maximum pinned memory size to 128 KiB
+	// Set the maximum pinned memory size to 128 MiB
 	status = cuFileDriverSetMaxPinnedMemSize(MAX_PINNED_MEM_SIZE);
 	if (status.err != CU_FILE_SUCCESS) {
 		std::cerr << "cuFileDriverSetMaxPinnedMemSize failed" << std::endl;
 		return EXIT_FAILURE;
 	}
 
-	// Set the maximum cache size to 64 KiB
-	status = cuFileDriverSetMaxCacheSize(MAX_CACHE_SIZE);
+	// Set GPU bounce buffer slab configuration
+	status = cuFileSetParameterGpuBounceBufferSlabArray(SLAB_SIZES_KB, SLAB_COUNTS, NUM_SLABS);
 	if (status.err != CU_FILE_SUCCESS) {
-		std::cerr << "cuFileDriverSetMaxCacheSize failed" << std::endl;
+		std::cerr << "cuFileSetParameterGpuBounceBufferSlabArray failed" << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -204,8 +215,8 @@ int main(int argc, char *argv[]) {
 		std::cerr << "Error: cuFileDriverGetProperties failed" << std::endl;
 		return EXIT_FAILURE;
 	}
-	std::cout << "Setting max pinned memory size to: " << props.max_device_pinned_mem_size << " bytes" << std::endl;
-	std::cout << "Setting max cache size to: " << props.max_device_cache_size << " bytes" << std::endl;
+	std::cout << "Setting max pinned memory size to: " << props.max_device_pinned_mem_size << " kilobytes" << std::endl;
+	std::cout << "Setting max cache size to: " << props.max_device_cache_size << " kilobytes (from slab configuration)" << std::endl;
 
 	// Open an individual file descriptor for each thread and allow for half the threads
 	// to use registered buffers and the other half to use unregistered buffers
