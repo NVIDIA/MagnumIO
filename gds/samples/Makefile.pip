@@ -129,7 +129,7 @@ install:
 	cp -r vectorAdd.cu Makefile README.md 1_cuFile_Basics/ 2_cuFile_Multithreaded/ 3_cuFile_Batch/ 4_cuFile_Async/ 5_cuFile_MemMap/ include/ common/ $(INSTALL_GDSSAMPLES_PREFIX)/
 
 clean:
-	find . -type f -executable -delete
+	rm -f $(objs) $(cuobjs) $(cusamples:.cu=_static)
 	rm -f *.o common/*.o cufile.log
 
 # Debug target to show detected paths
