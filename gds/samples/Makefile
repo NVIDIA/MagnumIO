@@ -62,6 +62,8 @@ LDFLAGS       :=  $(CUFILE_LIB) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STAT
 LDFLAGS_STATIC     :=  $(CUFILE_LIB_STATIC) -L $(CUDA_PATH)/lib64/stubs -lcuda $(CUDART_STATIC) -Bdynamic -lrt -ldl
 INSTALL_GDSSAMPLES_PREFIX = /usr/local/gds/samples
 NVCC          := $(CUDA_PATH)//bin/nvcc
+# CUDA 13.x CCCL headers (Thrust, CUB, libcu++) require C++17 for host code in .cu files.
+NVCCFLAGS     += -std=c++17
 
 ################################################################################
 CC:=/usr/bin/g++
@@ -93,7 +95,7 @@ CUDA_ARCH = -gencode=arch=compute_75,code=sm_75 \
 			-gencode=arch=compute_90,code=compute_90						
 
 vectorAdd.o : vectorAdd.cu
-	$(NVCC) $(INCLUDES) --cudadevrt static --cudart static \
+	$(NVCC) $(NVCCFLAGS) $(INCLUDES) --cudadevrt static --cudart static \
 		$(CUDA_ARCH)  --ptxas-options=-v --compiler-options \
 		--compile --lib $< -o $@
 
@@ -103,8 +105,8 @@ vectorAdd.o : vectorAdd.cu
 	$(CC)  $(INCLUDES) $(CXXFLAGS) $^ -o $@ $(LDFLAGS_STATIC)
 	
 5_cuFile_MemMap/memmap_thrust: 5_cuFile_MemMap/memmap_thrust.cu $(commonobjs)
-	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudadevrt static --cudart static $(CUDA_ARCH) $^ -o $@ $(CUFILE_LIB) -lcuda
-	$(NVCC) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $(CUDA_ARCH) $^ -o $@_static $(CUFILE_LIB_STATIC) -lcuda
+	$(NVCC) $(NVCCFLAGS) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudadevrt static --cudart static $(CUDA_ARCH) $^ -o $@ $(CUFILE_LIB) -lcuda
+	$(NVCC) $(NVCCFLAGS) -I $(CUFILE_INCLUDE_PATH) $(INCLUDES) --cudart static $(CUDA_ARCH) $^ -o $@_static $(CUFILE_LIB_STATIC) -lcuda
 
 install:
 	cp -r vectorAdd.cu Makefile README.md 1_cuFile_Basics/ 2_cuFile_Multithreaded/ 3_cuFile_Batch/ 4_cuFile_Async/ 5_cuFile_MemMap/ include/ common/ $(INSTALL_GDSSAMPLES_PREFIX)/

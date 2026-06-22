@@ -6,14 +6,6 @@ In this directory, you will find sample programs which demonstrate usage of NVID
 
 <strong>Note:</strong> The sample tests expect the data files to exist and be at least 128 MiB in size. The data files should have read/write permissions in GDS enabled mounts. Cleanup is handled using `goto` statements for simplicity. For idiomatic C++ resource management using RAII, refer to our C++ cuFile bindings.
 
-## Tags
-
-The `main` branch is backwards compatible with older cuFile versions. See tags below for new features:
-
-| Tag | Description | Requirement |
-|-----|-------------|-------------|
-| `v1.17-cuda13.2` | Slab-based GPU bounce buffer configuration via `cuFileSetParameterGpuBounceBufferSlabArray` | cuFile 1.17 / CUDA 13.2+ |
-
 ## Layout
 
 ```
