@@ -13,6 +13,7 @@ The `main` branch is backwards compatible with older cuFile versions. See tags b
 | Tag | Description | Requirement |
 |-----|-------------|-------------|
 | `v1.17-cuda13.2` | Slab-based GPU bounce buffer configuration via `cuFileSetParameterGpuBounceBufferSlabArray` | cuFile 1.17 / CUDA 13.2+ |
+| `v1.18-cuda13.3` | No new changes compared to previous release | cuFile 1.18 / CUDA 13.3+ |
 
 ## Layout
 
