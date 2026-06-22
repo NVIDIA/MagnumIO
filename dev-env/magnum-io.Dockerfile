@@ -14,7 +14,7 @@ RUN wget -qO - https://developer.download.nvidia.com/devtools/repos/ubuntu2004/a
     echo "deb https://developer.download.nvidia.com/devtools/repos/ubuntu2004/amd64/ /" >> /etc/apt/sources.list.d/hpccm.list && \
     apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        nsight-systems-cli-2021.2.1 && \
+        nsight-systems-cli-2022.1.1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Mellanox OFED version 5.3-1.0.0.1
@@ -91,7 +91,7 @@ ENV CPATH=/usr/local/nvshmem/include:$CPATH \
     LIBRARY_PATH=/usr/local/nvshmem/lib:$LIBRARY_PATH \
     PATH=/usr/local/nvshmem/bin:$PATH
 
-# NCCL 2.10.3-1
+# NCCL 2.11.4-1
 RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         apt-transport-https \
@@ -99,17 +99,17 @@ RUN apt-get update -y && \
         gnupg \
         wget && \
     rm -rf /var/lib/apt/lists/*
-RUN wget -qO - https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64/7fa2af80.pub | apt-key add - && \
-    echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1804/x86_64 /" >> /etc/apt/sources.list.d/hpccm.list && \
-    apt-get update -y && \
+
+RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libnccl-dev=2.10.3-1+cuda11.4 \
-        libnccl2=2.10.3-1+cuda11.4 && \
+        libnccl-dev=2.11.4-1+cuda11.4 \
+        libnccl2=2.11.4-1+cuda11.4 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        cuda-tools-11-4 && \
+        cuda-visual-tools-11-4=11.4.0-1 \
+        cuda-tools-11-4=11.4.0-1 && \
     rm -rf /var/lib/apt/lists/*
 
 COPY magnum-io.Dockerfile \
