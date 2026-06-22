@@ -68,3 +68,17 @@ Note: if you encounter error messages related to Tensor RT and device incompatib
 
 ## GDS Support
 The benchmark uses the [GDS enabled DALI numpy reader](https://docs.nvidia.com/deeplearning/dali/user-guide/docs/examples/general/data_loading/numpy_reader.html#GPUDirect-Storage-Support). Numpy (npy) is the only file format in DALI which currently supports GDS. For more information about the pipeline used in this benchmark, please see `data/cam_numpy_dali_dataset.py`.
+
+## Software Versions
+The benchmark was tested with the following software versions:
+
+PyTorch Container: nvcr.io/nvidia/pytorch:21.11-py3
+CUDA SDK: 11.6
+CUDA Driver: 510.47.03
+GDS: 1.2.1
+pytorch: 1.11.0a0+b6df043
+cuDNN: 8.3.0
+DALI: 1.12.0dev.20220304
+Torch-TensorRT: 1.1.0a0+00da3d1f
+
+The Dockerfile from the `pytorch/docker` already uses these versions. Concerning DALI, any version newer than the one stated is also supposed to work.
