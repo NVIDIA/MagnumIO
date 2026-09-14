@@ -23,6 +23,15 @@ the license-related text that should be included in all source code files.
 
 ## Subdirectories
 
+### /gds-diag
+
+A filesystem-aware GPUDirect Storage (GDS) diagnostic toolkit. It assesses
+bare metal hosts, virtual machines, or containers to identify GDS blockers or
+sub-optimal configurations and suggests mitigations. If you open this
+repository in Claude Code or Codex, the bundled AI skill routes GDS
+diagnostic questions to the right subcommand automatically. See
+`gds-diag/README.md`.
+
 ### /dev-env
 
 Contains the source files for the NVIDIA Magnum IO Developer Environment.

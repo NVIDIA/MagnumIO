@@ -1,0 +1,15 @@
+GDS Diag
+Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This directory is part of the Magnum IO repository and is covered by the
+repository's root LICENSE, with one local exception:
+
+The agent skill documentation and non-script assets (skills/) are licensed
+under the Creative Commons Attribution 4.0 International License AND the
+Apache License, Version 2.0. Scripts under skills/gds-diag/scripts/ are
+Apache-2.0 only. See LICENSE-CC-BY-4.0 and the root LICENSE.
+
+The repository references external NVIDIA documentation, CUDA/GDS packaging,
+Linux system interfaces, and optional runtime tools through documentation and
+runtime commands. Those components remain under their own licenses. See
+THIRD_PARTY_NOTICES.md for review notes.
