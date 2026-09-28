@@ -1,0 +1,88 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Pod template for gds-diag's k8s container-matrix integration tests.
+#
+# This is the single source of truth for the pod shape used by
+# tests/container_matrix/test_container_matrix.py's k8s engine. It is a
+# plain shell-style ($VAR / ${VAR}) template, filled in with Python's
+# string.Template -- the same substitution style `envsubst` uses -- so it
+# can also be applied by hand for manual debugging:
+#
+#   export POD_NAME=gds-diag-manual NAMESPACE=default IMAGE=python:3.11-slim \
+#          RUNTIME_CLASS=nvidia REPO_HOSTPATH=$PWD
+#   envsubst < tests/container_matrix/k8s/pod-template.yaml \
+#     | sed -e '/^\${EXTRA_/d' -e '/^\${NODE_NAME_LINE}/d' \
+#     | kubectl apply -f -
+#
+# (the test harness fills the ${EXTRA_*} / ${NODE_NAME_LINE} placeholders
+# with real YAML fragments or an empty string; envsubst alone will leave
+# them as literal lines, hence the `sed` cleanup above for a manual run.)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    app: gds-diag-container-matrix
+spec:
+  restartPolicy: Never
+  runtimeClassName: ${RUNTIME_CLASS}
+${NODE_NAME_LINE}  containers:
+    - name: gds-diag
+      image: ${IMAGE}
+      # The runner script execs as `python3` inside this container, and
+      # gds-diag needs `gdscheck`/nvidia-gds for live GDS checks. Plain CUDA
+      # images (nvcr.io/nvidia/cuda:*) have neither -- bootstrap both on
+      # first start if missing, rather than requiring every matrix image to
+      # bundle them. Each check no-ops instantly if already satisfied.
+      # nvidia-gds is matched to the image's own CUDA version (read from its
+      # /usr/local/cuda-X.Y directory) rather than the generic `nvidia-gds`
+      # meta-package, which could otherwise pull in a mismatched version.
+      # Images older than CUDA 12.2 don't have a matching nvidia-gds package
+      # in apt -- the install attempt fails and is swallowed (|| true), and
+      # gds-diag correctly reports gdscheck/live GDS as unavailable, same as
+      # for any image with no GDS packages.
+      # Debian/Ubuntu-only (apt-get); a non-apt image just falls through to
+      # the same "python3 not found" failure it would have hit anyway.
+      #
+      # The readinessProbe below (not just "the process started") is what
+      # `kubectl wait --for=condition=Ready` actually waits on -- without it,
+      # the pod is marked Ready the instant this command starts, and `kubectl
+      # exec python3 -` races ahead of the bootstrap and fails.
+      command:
+        - sh
+        - -c
+        - |
+          command -v python3 >/dev/null 2>&1 || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-minimal)
+          if ! command -v gdscheck >/dev/null 2>&1 && [ ! -e /usr/local/cuda/gds/tools/gdscheck ]; then
+            cuda_dir=$(ls -d /usr/local/cuda-*.* 2>/dev/null | head -1)
+            if [ -n "$cuda_dir" ]; then
+              ver=$(basename "$cuda_dir" | sed 's/^cuda-//' | tr . -)
+              apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "nvidia-gds-$ver" || true
+            fi
+          fi
+          touch /tmp/.gds-diag-ready
+          exec sleep 3600
+      readinessProbe:
+        exec: {command: ["test", "-e", "/tmp/.gds-diag-ready"]}
+        periodSeconds: 2
+        failureThreshold: 60
+      env:
+        - {name: GDS_DIAG_WORKDIR, value: "/work"}
+${EXTRA_ENV}      resources:
+        limits:
+          nvidia.com/gpu: "${GPU_COUNT}"
+      volumeMounts:
+        - {name: repo, mountPath: /work, readOnly: true}
+        - {name: udev, mountPath: /run/udev, readOnly: true}
+        - {name: sysfs, mountPath: /sys, readOnly: true}
+        - {name: cufile-config, mountPath: /etc/cufile.json, readOnly: true}
+        - {name: dev, mountPath: /dev}
+${EXTRA_VOLUME_MOUNTS}  volumes:
+    - {name: repo, hostPath: {path: "${REPO_HOSTPATH}", type: Directory}}
+    - {name: udev, hostPath: {path: /run/udev, type: Directory}}
+    - {name: sysfs, hostPath: {path: /sys, type: Directory}}
+    - {name: cufile-config, hostPath: {path: /etc/cufile.json, type: File}}
+    - {name: dev, hostPath: {path: /dev, type: Directory}}
+${EXTRA_VOLUMES}

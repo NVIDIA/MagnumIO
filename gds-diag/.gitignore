@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.codex
+cufile.log
+cufile.json
+tests/container_matrix/results/
+tests/container_matrix/scratch/

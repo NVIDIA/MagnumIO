@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+
+if [ "${GDS_DIAG_ROOT:-}" ] && [ -f "$GDS_DIAG_ROOT/gds-diag.py" ]; then
+  repo_root=$GDS_DIAG_ROOT
+else
+  repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd -P)
+fi
+
+if [ ! -f "$repo_root/gds-diag.py" ]; then
+  echo "gds-diag.py not found. Run from the gds-diag repo or set GDS_DIAG_ROOT." >&2
+  exit 2
+fi
+
+exec python3 "$repo_root/gds-diag.py" "$@"
