@@ -455,6 +455,38 @@ class TestRAID0:
 
 
 # ---------------------------------------------------------------------------
+# Device-mapper (LVM, dm-crypt, dm-multipath, ...)
+# ---------------------------------------------------------------------------
+
+class TestDeviceMapper:
+    def test_dm_backing_fails_native(self, gds_infrastructure, monkeypatch):
+        monkeypatch.setattr("checks.gds_report.get_dm_info", lambda path: "LVM")
+        reports = build_mode_reports("/mnt/lv0", "ext4")
+        result = _find(_by_mode(reports)[GDSMode.NATIVE], "Device-mapper backing device")
+        assert result is not None
+        assert result.status == Status.FAIL
+
+    def test_dm_backing_fails_p2pdma(self, gds_infrastructure, monkeypatch):
+        monkeypatch.setattr("checks.gds_report.get_dm_info", lambda path: "dm-crypt")
+        reports = build_mode_reports("/mnt/lv0", "ext4")
+        result = _find(_by_mode(reports)[GDSMode.P2PDMA], "Device-mapper backing device")
+        assert result is not None
+        assert result.status == Status.FAIL
+
+    def test_dm_backing_fails_native_mode_overall_status(self, gds_infrastructure, monkeypatch):
+        monkeypatch.setattr("checks.gds_report.get_dm_info", lambda path: "device-mapper multipath")
+        reports = build_mode_reports("/mnt/lv0", "ext4")
+        assert _by_mode(reports)[GDSMode.NATIVE].status == Status.FAIL
+        assert _by_mode(reports)[GDSMode.P2PDMA].status == Status.FAIL
+
+    def test_no_dm_backing_check_when_not_present(self, gds_infrastructure, monkeypatch):
+        monkeypatch.setattr("checks.gds_report.get_dm_info", lambda path: None)
+        reports = build_mode_reports("/mnt/data", "ext4")
+        assert _find(_by_mode(reports)[GDSMode.NATIVE], "Device-mapper backing device") is None
+        assert _find(_by_mode(reports)[GDSMode.P2PDMA], "Device-mapper backing device") is None
+
+
+# ---------------------------------------------------------------------------
 # Compat-only filesystems
 # ---------------------------------------------------------------------------
 

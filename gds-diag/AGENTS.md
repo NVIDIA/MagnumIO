@@ -407,5 +407,10 @@ Add or update tests for parser changes, support-matrix semantics, config-audit
 rules, and output regressions. For docs-only changes, at least run
 `git diff --check`.
 
+When a change adds a new check, subcommand, flag, or other user-visible
+behavior, add a bullet under `[Unreleased]` in `CHANGELOG.md`. Do not bump
+`__version__` in `checks/version.py` or add a new version heading — the user
+tags and bumps releases separately.
+
 Do not put host-specific credentials, private IPs, SSH keys, or lab-only paths in
 this file. Keep this memory portable across GDS users and environments.

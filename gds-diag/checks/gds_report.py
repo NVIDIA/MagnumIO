@@ -33,6 +33,7 @@ from .fs_matrix import (
     is_nvme_backed,
     get_nvme_transport,
     get_raid_level,
+    get_dm_info,
     FS_CAPABILITIES,
     FS_ALIASES,
 )
@@ -96,6 +97,30 @@ def _raid0_p2pdma_architecture_check() -> CheckResult:
             "For upstream PCI P2PDMA on x86 RAID0, upgrade to Linux kernel >= 7.1 "
             "or test a non-RAID local NVMe or NVMe-oF route with the matching "
             "cufile.json keys."
+        ),
+    )
+
+
+def _unsupported_device_mapper_check(dm_kind: str, mode: GDSMode) -> CheckResult:
+    return CheckResult(
+        check="Device-mapper backing device",
+        mode=mode,
+        status=Status.FAIL,
+        why=(
+            f"This mount is backed by a device-mapper device ({dm_kind}). "
+            "Both nvidia-fs/nvfs and P2PDMA/C2C resolve a mount down to a raw "
+            "NVMe (or supported RAID0) block device to set up direct DMA; "
+            "device-mapper targets such as LVM, dm-crypt, and dm-multipath "
+            "remap block addressing in ways GDS cannot see through, so direct "
+            "GDS is not supported on this route regardless of what physical "
+            "storage backs the device-mapper volume."
+        ),
+        mitigation=(
+            "Remove the device-mapper layer for this mount: use the raw NVMe "
+            "partition directly (no LVM, dm-crypt, or multipath), or a "
+            "supported mdadm RAID0 route, then remount. If LVM, encryption, or "
+            "multipath is required for operational reasons, GDS will not "
+            "accelerate this path — use compat mode instead."
         ),
     )
 
@@ -463,6 +488,14 @@ def _gdscheck_native_inactive_result(
 # Core: run all checks for a given filesystem type and path
 # ---------------------------------------------------------------------------
 
+def _report_for(reports: list[ModeReport], mode: GDSMode) -> Optional[ModeReport]:
+    return next((r for r in reports if r.mode == mode), None)
+
+
+def _has_static_fail(report: Optional[ModeReport]) -> bool:
+    return report is not None and any(r.status == Status.FAIL for r in report.results)
+
+
 def _enrich_with_gdscheck(
     reports: list[ModeReport],
     gds_output: str,
@@ -511,12 +544,22 @@ def _enrich_with_gdscheck(
             # Mode is not active per gdscheck — surface the diagnosis
             if report.mode == GDSMode.NATIVE:
                 result = _gdscheck_native_inactive_result(gds_output, parse_fs_type, nvme_backed)
-                if result:
+                # Don't claim P2PDMA/C2C is the active alternative when this
+                # mount's own static P2PDMA checks already failed.
+                if result and not (
+                    result.status == Status.INFO
+                    and _has_static_fail(_report_for(reports, GDSMode.P2PDMA))
+                ):
                     report.results.append(result)
 
             elif report.mode == GDSMode.P2PDMA:
+                # gdscheck only sees the filesystem/driver state, not static
+                # blockers found above (device-mapper, RAID level, ext4 data
+                # mode, ...), so only claim nvfs is available if the Native
+                # report itself has no failures.
                 if (
                     gds.get(GDSMode.NATIVE) is True
+                    and not _has_static_fail(_report_for(reports, GDSMode.NATIVE))
                     and not unsupported_raid_level
                     and parse_fs_type != "raid0"
                     and fs_type in {"ext4", "xfs", "nvme-of"}
@@ -564,6 +607,7 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
     nvme_transport = get_nvme_transport(path) if path and fs_type in _LOCAL_BLOCK_FS else None
     raid_level = get_raid_level(path) if path and fs_type in _LOCAL_BLOCK_FS else None
     unsupported_raid_level = raid_level if raid_level and raid_level != "raid0" else None
+    dm_kind = get_dm_info(path) if path and fs_type in _LOCAL_BLOCK_FS else None
     if raid_level == "raid0":
         p2pdma_block_key = "raid"
     elif nvme_transport and nvme_transport != "pcie":
@@ -593,6 +637,10 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
         if unsupported_raid_level:
             native_report.results.append(
                 _unsupported_raid_direct_gds_check(unsupported_raid_level, GDSMode.NATIVE)
+            )
+        if dm_kind:
+            native_report.results.append(
+                _unsupported_device_mapper_check(dm_kind, GDSMode.NATIVE)
             )
         # cufile.json: only include checks relevant to native GDS (e.g. force_compat_mode).
         # P2PDMA settings (use_pci_p2pdma) belong to the P2PDMA report, not here.
@@ -756,6 +804,10 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
             p2pdma_report.results.append(
                 _unsupported_raid_direct_gds_check(unsupported_raid_level, GDSMode.P2PDMA)
             )
+        if dm_kind:
+            p2pdma_report.results.append(
+                _unsupported_device_mapper_check(dm_kind, GDSMode.P2PDMA)
+            )
         nvme_backed = _infer_nvme_backed(path, fs_type)
         if path and fs_type in _LOCAL_BLOCK_FS and nvme_transport:
             block_key = "block.nvmeof.use_pci_p2pdma" if nvme_transport != "pcie" else "block.nvme.use_pci_p2pdma"
@@ -784,7 +836,7 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
                     "For ext4/XFS, P2PDMA is only a GDS library-supported route "
                     "when the filesystem is backed by NVMe."
                 ),
-                mitigation="Verify the backing device: lsblk -d -o NAME,ROTA,TYPE $(df --output=source <path> | tail -1)",
+                mitigation="Verify the backing device: lsblk -s -o NAME,ROTA,TYPE $(df --output=source <path> | tail -1)",
             ))
         elif not path and nvme_backed:
             p2pdma_report.results.append(CheckResult(
@@ -1321,13 +1373,23 @@ def _build_mode_support(reports: list[ModeReport], fs_type: str, path: str = "")
                 and parse_fs_type != "raid0"
                 and fs_type in {"ext4", "xfs", "nvme-of"}
             ):
-                if report.mode == GDSMode.P2PDMA and gds.get(GDSMode.NATIVE) is True:
+                # Only claim the other route is available if its own static
+                # checks did not already fail (gdscheck can't see those).
+                if (
+                    report.mode == GDSMode.P2PDMA
+                    and gds.get(GDSMode.NATIVE) is True
+                    and not _has_static_fail(_report_for(reports, GDSMode.NATIVE))
+                ):
                     lines.append(
                         f"   {green('OK:')} Direct GDS is still available via nvidia-fs/nvfs. "
                         "This is valid for NVMe/NVMe-oF stacks with the required MLNX_OFED/DOCA GDS patches."
                     )
                     alternate_direct = True
-                elif report.mode == GDSMode.NATIVE and gds.get(GDSMode.P2PDMA) is True:
+                elif (
+                    report.mode == GDSMode.NATIVE
+                    and gds.get(GDSMode.P2PDMA) is True
+                    and not _has_static_fail(_report_for(reports, GDSMode.P2PDMA))
+                ):
                     lines.append(
                         f"   {green('OK:')} Direct GDS is available via P2PDMA/C2C. "
                         "The direct P2P path takes precedence when both P2PDMA/C2C and nvidia-fs are available."
