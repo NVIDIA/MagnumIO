@@ -226,26 +226,6 @@ def _driver_config_modes_any(output: str, driver_keys: tuple[str, ...]) -> Optio
     return None
 
 
-def _cufile_prop(output: str, prop_key: str) -> Optional[str]:
-    """
-    Parse CUFILE CONFIGURATION section for a dotted property key.
-    Returns the value string (e.g. "true" / "false") or None if not found.
-    gdscheck format: "  block.nvme.use_pci_p2pdma : true"
-    """
-    for line in _gdscheck_section(output, "CUFILE CONFIGURATION"):
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        if key.strip().lower() == prop_key.lower():
-            return val.strip().lower()
-    return None
-
-
-def _gdscheck_verdict(fs_type: str, nvme_backed: bool) -> dict[GDSMode, bool]:
-    """Convenience wrapper: run gdscheck and parse into mode verdict dict."""
-    return _gdscheck_parse(_run_gdscheck_raw(), fs_type, nvme_backed)
-
-
 def _infer_nvme_backed(path: str, fs_type: str) -> bool:
     """
     Determine whether the path/filesystem is NVMe-backed.
@@ -575,7 +555,7 @@ def _enrich_with_gdscheck(
                         ),
                     ))
                 else:
-                    raw = _gdscheck_p2pdma_blockers(gds_output, parse_fs_type)
+                    raw = _gdscheck_p2pdma_blockers(gds_output)
                     for why, mitigation in _filter_p2pdma_blockers_against_static_checks(raw, report):
                         report.results.append(CheckResult(
                             check="gdscheck P2PDMA/C2C route",
@@ -615,12 +595,14 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
     else:
         p2pdma_block_key = None
 
-    # Parse cufile.json once — results are shared across mode reports.
-    _cufile_all = cufile_config.run_all(fs_type, p2pdma_block_key=p2pdma_block_key)
-
-    # Run gdscheck once here for the open driver check (shared by NATIVE and P2PDMA).
-    # _build_mode_support() runs it again for the mode verdict — two total invocations.
+    # Run gdscheck once; shared by the cufile.json checks, the open driver
+    # check (NATIVE and P2PDMA), and the gdscheck enrichment below.
     _gds_raw_for_driver = _run_gdscheck_raw() or ""
+
+    # Parse cufile.json once — results are shared across mode reports.
+    _cufile_all = cufile_config.run_all(
+        fs_type, p2pdma_block_key=p2pdma_block_key, gdscheck_output=_gds_raw_for_driver
+    )
 
     # ------------------------------------------------------------------ #
     # Native GDS (nvidia-fs)                                               #
@@ -892,8 +874,7 @@ def build_mode_reports(path: str, fs_type: str) -> list[ModeReport]:
     reports.append(compat_report)
 
     # Enrich reports with gdscheck-derived diagnosis now that all static
-    # checks are in place.  parse_fs_type mirrors the logic in _build_mode_support
-    # but uses the values already computed above.
+    # checks are in place, using the RAID/transport values computed above.
     if _gds_raw_for_driver:
         if raid_level == "raid0":
             parse_fs_type = "raid0"
@@ -1107,137 +1088,16 @@ def render_text_report(
     return "\n".join(lines)
 
 
-def _gdscheck_p2pdma_blockers(output: str, fs_type: str = "") -> list[tuple[str, str]]:
+def _gdscheck_p2pdma_blockers(output: str) -> list[tuple[str, str]]:
     """
-    Determine why P2PDMA/C2C is not supported, in priority order:
-      1. cufile.json settings (most common — properties and block-level must both be true)
-      2. Hardware blockers from PLATFORM INFO (ACS, IOMMU)
+    Hardware blockers for P2PDMA/C2C from gdscheck PLATFORM INFO (ACS, IOMMU).
     Returns list of (why, mitigation) tuples.
-    If cufile.json is the blocker, returns early — no point surfacing ACS noise.
+
+    cufile.json and RAID blockers are not re-derived here: the static checks
+    (cufile_config, RAID level/architecture) report them from the same
+    effective configuration gdscheck uses.
     """
     blockers = []
-
-    # --- cufile.json settings (check first — this is the most common reason) ---
-    # Only GDS library-supported P2PDMA/C2C routes should reach this blocker path:
-    # local NVMe (ext4/xfs), NVMe-oF, virtiofs, and RAID0.
-    from .fs_matrix import FS_CAPABILITIES, FS_ALIASES, P2PDMA_CONFIG_KEY
-    normalized_fs = FS_ALIASES.get(fs_type, fs_type)
-    caps = FS_CAPABILITIES.get(normalized_fs, {})
-    p2pdma_cap = caps.get("p2pdma")
-
-    unsupported_raid_match = re.fullmatch(r"raid([1-9][0-9]*)", normalized_fs or "")
-    if unsupported_raid_match and normalized_fs != "raid0":
-        blockers.append((
-            (
-                f"{normalized_fs.upper()} is not a supported direct GDS RAID route. "
-                "Only RAID0 is documented as a supported RAID route."
-            ),
-            (
-                "Use RAID0 over supported NVMe devices, a non-RAID supported NVMe "
-                "or NVMe-oF route, or compat mode."
-            ),
-        ))
-
-    if normalized_fs == "raid0" and not _raid0_p2pdma_supported_by_arch_or_kernel():
-        major, minor, patch = kernel._kernel_version()
-        ver_str = f"{major}.{minor}.{patch}"
-        blockers.append((
-            (
-                "RAID0 P2PDMA requires NVIDIA Grace or Linux kernel >= 7.1. "
-                "This host is not detected as an NVIDIA Grace platform and is "
-                f"running kernel {ver_str}, so upstream PCI P2PDMA is not active "
-                "for this RAID0 route even if gdscheck reports an NVMe P2PDMA token."
-            ),
-            (
-                "Use nvidia-fs/nvfs for direct GDS on this RAID0 mount when the NVMe "
-                "stack has the required MLNX_OFED/DOCA GDS patches, or use compat mode. "
-                "For upstream PCI P2PDMA on x86 RAID0, upgrade to Linux kernel >= 7.1 "
-                "or test a non-RAID local NVMe or NVMe-oF route."
-            ),
-        ))
-
-    config_issues = []
-    if normalized_fs == "raid0":
-        prop_val = _cufile_prop(output, "properties.use_pci_p2pdma")
-        block_val = _cufile_prop(output, "block.raid.use_pci_p2pdma")
-        failing = []
-        if prop_val != "true":
-            failing.append(f"properties.use_pci_p2pdma = {prop_val or 'not set'}")
-        if block_val != "true":
-            failing.append(f"block.raid.use_pci_p2pdma = {block_val or 'not set'}")
-        if failing:
-            config_issues.append((
-                f"P2PDMA/C2C disabled in /etc/cufile.json: {', '.join(failing)}",
-                (
-                    "Both settings must be true in /etc/cufile.json:\n"
-                    '  "properties": { "use_pci_p2pdma": true }\n'
-                    '  "block": { "raid": { "use_pci_p2pdma": true } }\n'
-                    "On x86 these keys enable upstream PCI P2PDMA; on supported "
-                    "GH/GB ARM platforms they enable the C2C path when the "
-                    "route is supported."
-                ),
-            ))
-    elif p2pdma_cap == "config":
-        # Supported fs-specific P2PDMA route (virtiofs): check both the
-        # general properties key and the fs-specific key — gdscheck only
-        # reports the route active when both are true.
-        fs_key = P2PDMA_CONFIG_KEY.get(normalized_fs, f"fs.{normalized_fs}.use_pci_p2pdma")
-        prop_val = _cufile_prop(output, "properties.use_pci_p2pdma")
-        fs_val = _cufile_prop(output, fs_key)
-        failing = []
-        if prop_val != "true":
-            failing.append(f"properties.use_pci_p2pdma = {prop_val or 'not set'}")
-        if fs_val != "true":
-            failing.append(f"{fs_key} = {fs_val or 'not set'}")
-        if failing:
-            config_issues.append((
-                f"P2PDMA/C2C disabled in /etc/cufile.json: {', '.join(failing)}",
-                (
-                    "Both settings must be true in /etc/cufile.json:\n"
-                    '  "properties": { "use_pci_p2pdma": true }\n'
-                    f'  "fs": {{ "{normalized_fs}": {{ "use_pci_p2pdma": true }} }}'
-                    "\nOn x86 these keys enable upstream PCI P2PDMA; on supported "
-                    "GH/GB ARM platforms they enable the C2C path when the "
-                    "route is supported."
-                ),
-            ))
-    else:
-        # Local NVMe FS: check global properties + block transport key
-        prop_val  = _cufile_prop(output, "properties.use_pci_p2pdma")
-        if fs_type == "nvme-of":
-            block_key = "block.nvmeof.use_pci_p2pdma"
-        elif fs_type == "raid0":
-            block_key = "block.raid.use_pci_p2pdma"
-        else:
-            block_key = "block.nvme.use_pci_p2pdma"
-        block_val = _cufile_prop(output, block_key)
-
-        failing = []
-        if prop_val != "true":
-            failing.append(f"properties.use_pci_p2pdma = {prop_val or 'not set'}")
-        if block_val != "true":
-            failing.append(f"{block_key} = {block_val or 'not set'}")
-
-        if failing:
-            config_issues.append((
-                f"P2PDMA/C2C disabled in /etc/cufile.json: {', '.join(failing)}",
-                (
-                    "Settings must be true in /etc/cufile.json:\n"
-                    '  "properties": { "use_pci_p2pdma": true }\n'
-                    f'  "block": {{ "{block_key.split(".")[1]}": {{ "use_pci_p2pdma": true }} }}\n'
-                    "On x86 these keys enable upstream PCI P2PDMA; on supported "
-                    "GH/GB ARM platforms they enable the C2C path when the "
-                    "route is supported."
-                ),
-            ))
-
-    if config_issues:
-        blockers.extend(config_issues)
-        # cufile.json is the primary fix, but also surface hardware blockers that will need
-        # attention after the config is fixed — so the user can plan for both at once.
-        hw_prefix = "Also (after fixing cufile.json): "
-    else:
-        hw_prefix = ""
 
     # --- Hardware blockers from gdscheck PLATFORM INFO ---
     for line in _gdscheck_section(output, "PLATFORM INFO"):
@@ -1249,7 +1109,7 @@ def _gdscheck_p2pdma_blockers(output: str, fs_type: str = "") -> list[tuple[str,
             bdf_match = re.search(r"([0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-9a-f])", stripped, re.I)
             bdf = bdf_match.group(1) if bdf_match else "<switch_bdf>"
             blockers.append((
-                f"{hw_prefix}{stripped}",
+                stripped,
                 (
                     "Option 1 (persistent, requires reboot): Add pci=noacs to GRUB_CMDLINE_LINUX in /etc/default/grub, then update-grub + reboot\n"
                     "Option 2: Disable ACS in BIOS/UEFI for the PCIe switch\n"
@@ -1263,7 +1123,7 @@ def _gdscheck_p2pdma_blockers(output: str, fs_type: str = "") -> list[tuple[str,
             and not stripped.startswith("WARN")  # gdscheck warnings are advisory, not blockers
         ):
             blockers.append((
-                f"{hw_prefix}{stripped}",
+                stripped,
                 "Add iommu=pt to kernel cmdline: intel_iommu=on iommu=pt or amd_iommu=on iommu=pt",
             ))
 
@@ -1291,180 +1151,6 @@ def _filter_p2pdma_blockers_against_static_checks(
             continue
         filtered.append((why, mitigation))
     return filtered
-
-
-def _build_mode_support(reports: list[ModeReport], fs_type: str, path: str = "") -> str:
-    """
-    Per-mode status section: shows each mode as Supported / Not supported / N/A
-    and, for unsupported modes, explains why and what to do.
-    Replaces the old single-paragraph Recommendation block.
-    """
-    nvme_backed = _infer_nvme_backed(path, fs_type)
-    gds_output  = _run_gdscheck_raw()
-    parse_fs_type = fs_type
-    unsupported_raid_level = None
-    if path and fs_type in _LOCAL_BLOCK_FS:
-        raid_level = get_raid_level(path)
-        transport = get_nvme_transport(path)
-        if raid_level == "raid0":
-            parse_fs_type = "raid0"
-        elif raid_level:
-            unsupported_raid_level = raid_level
-            parse_fs_type = raid_level
-        elif transport and transport != "pcie":
-            parse_fs_type = "nvme-of"
-    gds         = _gdscheck_parse(gds_output, parse_fs_type, nvme_backed) if gds_output else {}
-    driver_keys = _FS_DRIVER_KEYS.get(parse_fs_type)
-    if driver_keys is None and nvme_backed:
-        driver_keys = ("NVMe",)
-    driver_label = " or ".join(driver_keys) if driver_keys else (fs_type or "filesystem")
-
-    def _mode_supported(mode: GDSMode, report: ModeReport) -> Optional[bool]:
-        """
-        True=supported, False=not supported, None=cannot determine.
-
-        None has two sources:
-          - report.applicable is False  → mode is N/A for this FS type
-          - gds[mode] is None           → gdscheck ran but FS client not active
-          - all static checks are WARNs → no positive evidence either way
-        Caller distinguishes these via report.applicable.
-        """
-        if not report.applicable:
-            return None
-        if unsupported_raid_level and mode in (GDSMode.NATIVE, GDSMode.P2PDMA):
-            return False
-        if report.status == Status.FAIL:
-            return False
-        if mode in gds:
-            return gds[mode]  # True, False, or None (client not active)
-        if report.status == Status.PASS:
-            return True
-        # WARN with no gdscheck verdict: only claim Supported if ≥1 check actually passed
-        if any(r.status == Status.PASS for r in report.results):
-            return True
-        # All WARNs, no PASSes, no gdscheck verdict — cannot verify
-        return None
-
-    lines: list[str] = []
-
-    for report in reports:
-        supported = _mode_supported(report.mode, report)
-        mode_label = f"{report.mode.value}"
-        _start = len(lines)
-
-        if supported is None:
-            if not report.applicable:
-                pass  # N/A reason shown in Detailed Findings box
-            else:
-                # Mode is applicable but gdscheck has no evidence (FS client not active)
-                lines.append(f"{dim('?')}  {mode_label:<40} {dim('Cannot verify')}")
-                lines.append(f"   {dim('No active ' + driver_label + ' client found by gdscheck.')}")
-                lines.append(f"   {dim('Mount the filesystem and re-run to get an authoritative verdict.')}")
-
-        elif supported:
-            pass  # Mode Availability table already shows ✓ for this mode
-
-        else:
-            lines.append(f"{dim('-')}  {mode_label:<40} {dim('Not active')}")
-
-            alternate_direct = False
-            if (
-                not unsupported_raid_level
-                and parse_fs_type != "raid0"
-                and fs_type in {"ext4", "xfs", "nvme-of"}
-            ):
-                # Only claim the other route is available if its own static
-                # checks did not already fail (gdscheck can't see those).
-                if (
-                    report.mode == GDSMode.P2PDMA
-                    and gds.get(GDSMode.NATIVE) is True
-                    and not _has_static_fail(_report_for(reports, GDSMode.NATIVE))
-                ):
-                    lines.append(
-                        f"   {green('OK:')} Direct GDS is still available via nvidia-fs/nvfs. "
-                        "This is valid for NVMe/NVMe-oF stacks with the required MLNX_OFED/DOCA GDS patches."
-                    )
-                    alternate_direct = True
-                elif (
-                    report.mode == GDSMode.NATIVE
-                    and gds.get(GDSMode.P2PDMA) is True
-                    and not _has_static_fail(_report_for(reports, GDSMode.P2PDMA))
-                ):
-                    lines.append(
-                        f"   {green('OK:')} Direct GDS is available via P2PDMA/C2C. "
-                        "The direct P2P path takes precedence when both P2PDMA/C2C and nvidia-fs are available."
-                    )
-                    alternate_direct = True
-
-            # Collect why + mitigations from static check FAILs
-            blockers = report.blockers()
-
-            # For P2PDMA: pull authoritative blockers (cufile.json first, then hardware)
-            hw_shown = False
-            if alternate_direct:
-                hw_shown = True
-            elif report.mode == GDSMode.NATIVE and gds_output:
-                for _, why, mitigation in _gdscheck_native_inactive_diagnosis(
-                    gds_output,
-                    parse_fs_type,
-                    nvme_backed,
-                ):
-                    lines.append(f"   {yellow('Why:')} {why}")
-                    for m_line in mitigation.splitlines():
-                        lines.append(f"   {yellow('→')}    {m_line}")
-                    hw_shown = True
-            elif report.mode == GDSMode.P2PDMA and gds_output:
-                p2p_blockers = _filter_p2pdma_blockers_against_static_checks(
-                    _gdscheck_p2pdma_blockers(gds_output, parse_fs_type),
-                    report,
-                )
-                for why, mitigation in p2p_blockers:
-                    lines.append(f"   {yellow('Why:')} {why}")
-                    for m_line in mitigation.splitlines():
-                        lines.append(f"   {yellow('→')}    {m_line}")
-                    hw_shown = True
-
-            # For RDMA: parse gdscheck RDMA sub-items for specific diagnosis
-            elif report.mode == GDSMode.RDMA and gds_output:
-                rdma_issues = _gdscheck_rdma_diagnosis(gds_output, fs_type)
-                for why, mitigation in rdma_issues:
-                    lines.append(f"   {yellow('Why:')} {why}")
-                    for m_line in mitigation.splitlines():
-                        lines.append(f"   {yellow('→')}    {m_line}")
-                    hw_shown = True
-
-            # Show static check FAILs — but skip for P2PDMA/RDMA when gdscheck
-            # already provided authoritative blockers (avoids repeating the same info).
-            if not (hw_shown and report.mode in (GDSMode.P2PDMA, GDSMode.RDMA)):
-                for result in blockers:
-                    lines.append(f"   {yellow('Why:')} {textwrap.fill(result.why, width=62, subsequent_indent='        ')}")
-                    if result.mitigation:
-                        for m_line in result.mitigation.splitlines():
-                            lines.append(f"   {yellow('→')}    {m_line}")
-
-            if not hw_shown and not blockers:
-                if report.mode == GDSMode.P2PDMA:
-                    # P2PDMA absent from gdscheck but no specific blocker detected
-                    lines.append(f"   {yellow('Why:')} P2PDMA not available — check PCIe topology, ACS, and IOMMU")
-                    lines.append(f"   {yellow('→')}    sudo lspci -vvv | grep -A5 ACSCtl  # look for ReqRedir+")
-                    lines.append(f"   {yellow('→')}    cat /proc/cmdline  # check iommu= settings")
-                elif report.mode == GDSMode.RDMA:
-                    from .fs_matrix import FS_CAPABILITIES, FS_ALIASES as _FSAL
-                    _rdma_type = FS_CAPABILITIES.get(_FSAL.get(fs_type, fs_type), {}).get("rdma_type", "userspace")
-                    if _rdma_type == "kernel":
-                        lines.append(f"   {yellow('Why:')} Kernel RDMA not available — check MLNX_OFED and nvidia-fs")
-                        if fs_type == "nfs":
-                            lines.append(f"   {yellow('→')}    Mount with: -o rdma,port=20049")
-                        lines.append(f"   {yellow('→')}    ofed_info -s             # verify MLNX_OFED installed")
-                        lines.append(f"   {yellow('→')}    ibv_devinfo              # check IB port state")
-                        lines.append(f"   {yellow('→')}    lsmod | grep nvidia_fs   # nvidia-fs must be loaded for the kernel RDMA path")
-                    else:
-                        lines.append(f"   {yellow('Why:')} RDMA not available — run: gdscheck -p | grep -A10 'Userspace RDMA'")
-
-        if len(lines) > _start:
-            lines.append("")
-
-    return "\n".join(lines).rstrip()
 
 
 def _gdscheck_parse(output: str, fs_type: str, nvme_backed: bool) -> dict[GDSMode, Optional[bool]]:

@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   mount to a raw NVMe (or supported RAID0) block device and cannot see
   through device-mapper's block remapping.
 
+### Removed
+- `mount-check`: redundant gdscheck-derived P2PDMA/C2C cufile.json and RAID
+  findings that repeated the static checks.
+
 ## [1.0.0] - Initial release
 
 Initial version of gds-diag with the following core capabilities implemented as subcommands:

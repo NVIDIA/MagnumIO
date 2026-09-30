@@ -89,67 +89,17 @@ DRIVER CONFIGURATION:
 """
 
 
-GDSCHECK_VIRTIOFS_FS_KEY_ONLY = """\
-=====================
-DRIVER CONFIGURATION:
-=====================
-  VIRTIOFS           : compat
-=====================
-CUFILE CONFIGURATION:
-=====================
-  properties.use_pci_p2pdma : false
-  fs.virtiofs.use_pci_p2pdma : true
-=====================
-"""
-
-
-GDSCHECK_VIRTIOFS_BOTH_KEYS = """\
-=====================
-DRIVER CONFIGURATION:
-=====================
-  VIRTIOFS           : p2pdma, compat
-=====================
-CUFILE CONFIGURATION:
-=====================
-  properties.use_pci_p2pdma : true
-  fs.virtiofs.use_pci_p2pdma : true
-=====================
-"""
-
-
-class GdscheckP2pdmaBlockersVirtiofsTests(unittest.TestCase):
-    """
-    Regression coverage for a real gap found while validating gds-diag against
-    a live virtiofs P2PDMA test VM: gdscheck only reports the VIRTIOFS route
-    as active when *both* properties.use_pci_p2pdma and
-    fs.virtiofs.use_pci_p2pdma are true, but the checker used to only look at
-    the fs-specific key — so it would report "config OK" even though the
-    route was not actually active.
-    """
-
-    def test_fs_key_alone_is_reported_as_a_blocker(self):
-        blockers = gds_report._gdscheck_p2pdma_blockers(
-            GDSCHECK_VIRTIOFS_FS_KEY_ONLY, fs_type="virtiofs"
-        )
-
-        why = "\n".join(b[0] for b in blockers)
-        self.assertIn("properties.use_pci_p2pdma = false", why)
-
-    def test_both_keys_true_reports_no_config_blocker(self):
-        blockers = gds_report._gdscheck_p2pdma_blockers(
-            GDSCHECK_VIRTIOFS_BOTH_KEYS, fs_type="virtiofs"
-        )
-
-        why = "\n".join(b[0] for b in blockers)
-        self.assertNotIn("use_pci_p2pdma", why)
-
-
 class GdsReportRenderingTests(unittest.TestCase):
-    def _mode_support_line(self, text: str, mode: GDSMode) -> str:
-        for line in text.splitlines():
-            if mode.value in line:
-                return line
-        self.fail(f"missing mode support line for {mode.value!r}")
+    def _enrich(self, reports, output, fs_type, parse_fs_type=None, nvme_backed=True,
+                unsupported_raid_level=None):
+        gds_report._enrich_with_gdscheck(
+            reports, output, fs_type, parse_fs_type or fs_type, nvme_backed, unsupported_raid_level
+        )
+        return {r.mode: r for r in reports}
+
+    @staticmethod
+    def _gdscheck_results(report):
+        return [r for r in report.results if r.check.startswith("gdscheck")]
 
     def test_normal_mount_report_shows_info_findings(self):
         reports = [
@@ -179,31 +129,21 @@ class GdsReportRenderingTests(unittest.TestCase):
         self.assertIn("PCIe topology", text)
         self.assertNotIn("No warnings or errors.", text)
 
-    def test_applicable_inactive_p2pdma_renders_not_active(self):
+    def test_inactive_p2pdma_with_active_nvfs_reports_alternate_route(self):
         reports = [
-            ModeReport(
+            ModeReport(mode=GDSMode.NATIVE, applicable=True),
+            ModeReport(mode=GDSMode.P2PDMA, applicable=True, results=[CheckResult(
+                check="PCIe topology",
                 mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="PCIe topology",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.INFO,
-                        why="GDS can still operate across root ports.",
-                    )
-                ],
-            )
+                status=Status.INFO,
+                why="GDS can still operate across root ports.",
+            )]),
         ]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_NVFS_ONLY
-            text = gds_report._build_mode_support(reports, "ext4", "")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_NVME_NVFS_ONLY, "ext4")
 
-        self.assertIn("Not active", text)
-        self.assertNotIn("Not supported", text)
+        whys = [r.why for r in self._gdscheck_results(by_mode[GDSMode.P2PDMA])]
+        self.assertTrue(any("Direct GDS is still available via nvidia-fs/nvfs" in w for w in whys))
 
     def test_inactive_nvfs_on_nvme_reports_doca_mitigation(self):
         reports = [
@@ -221,18 +161,13 @@ class GdsReportRenderingTests(unittest.TestCase):
             )
         ]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_COMPAT_ONLY
-            text = gds_report._build_mode_support(reports, "xfs", "")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_NVME_COMPAT_ONLY, "xfs")
 
-        self.assertIn("Native GDS (nvidia-fs)", text)
-        self.assertIn("Not active", self._mode_support_line(text, GDSMode.NATIVE))
-        self.assertIn("gdscheck reports NVMe: compat", text)
-        self.assertIn("GDS storage-stack patches from MLNX_OFED or DOCA", text)
-        self.assertIn("doca-host-installation-and-upgrade", text)
+        results = self._gdscheck_results(by_mode[GDSMode.NATIVE])
+        self.assertEqual(len(results), 1)
+        self.assertIn("gdscheck reports NVMe: compat", results[0].why)
+        self.assertIn("GDS storage-stack patches from MLNX_OFED or DOCA", results[0].mitigation)
+        self.assertIn("doca-host-installation-and-upgrade", results[0].mitigation)
 
     def test_gdscheck_acs_blocker_is_suppressed_when_static_acs_passes(self):
         reports = [
@@ -256,40 +191,41 @@ class GdsReportRenderingTests(unittest.TestCase):
             )
         ]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_COMPAT_WITH_P2P_CONFIG_AND_ACS
-            text = gds_report._build_mode_support(reports, "xfs", "")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_NVME_COMPAT_WITH_P2P_CONFIG_AND_ACS, "xfs")
 
-        self.assertIn("properties.use_pci_p2pdma = false", text)
-        self.assertNotIn("Found ACS enabled", text)
+        whys = "\n".join(r.why for r in self._gdscheck_results(by_mode[GDSMode.P2PDMA]))
+        self.assertNotIn("Found ACS enabled", whys)
 
-    def test_c2c_token_renders_p2pdma_supported(self):
-        reports = [
-            ModeReport(
+    def test_gdscheck_explainer_leaves_cufile_and_raid_to_static_checks(self):
+        # These conditions are reported by static checks (cufile_config and the
+        # RAID checks) from the same effective configuration; gdscheck must not
+        # repeat them. Only PLATFORM INFO hardware blockers come from gdscheck.
+        output = (
+            GDSCHECK_NVME_COMPAT_WITH_P2P_CONFIG_AND_ACS
+            + "CUFILE CONFIGURATION:\n=====================\n"
+            + "  block.raid.use_pci_p2pdma : false\n"
+            + "  fs.virtiofs.use_pci_p2pdma : false\n=====================\n"
+        )
+        with mock.patch.object(gds_report.iommu, "is_grace", return_value=False), \
+                mock.patch.object(gds_report.kernel, "_kernel_version", return_value=(6, 8, 0)):
+            whys = [why for why, _ in gds_report._gdscheck_p2pdma_blockers(output)]
+
+        self.assertEqual(whys, ["Found ACS enabled for switch 0000:40:01.1"])
+
+    def test_c2c_token_marks_p2pdma_active(self):
+        self.assertIs(
+            gds_report._gdscheck_parse(GDSCHECK_NVME_C2C, "ext4", True)[GDSMode.P2PDMA], True
+        )
+        reports = [ModeReport(mode=GDSMode.P2PDMA, applicable=True, results=[CheckResult(
+                check="PCIe topology",
                 mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="PCIe topology",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.INFO,
-                        why="GDS can still operate across root ports.",
-                    )
-                ],
-            )
-        ]
+                status=Status.INFO,
+                why="GDS can still operate across root ports.",
+            )])]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_C2C
-            text = gds_report._build_mode_support(reports, "ext4", "")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_NVME_C2C, "ext4")
 
-        self.assertNotIn("Not active", text)
+        self.assertEqual(self._gdscheck_results(by_mode[GDSMode.P2PDMA]), [])
 
     def test_gpfs_p2pdma_token_does_not_suppress_native_warning(self):
         result = gds_report._gdscheck_native_inactive_result(
@@ -396,166 +332,50 @@ class GdsReportRenderingTests(unittest.TestCase):
         self.assertTrue(gds_report.has_blocking_failures(reports, "ext4"))
 
     def test_raid0_p2pdma_token_is_not_supported_on_non_grace(self):
-        reports = [
-            ModeReport(
-                mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="RAID0 P2PDMA architecture",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.FAIL,
-                        why="RAID0 P2PDMA requires NVIDIA Grace or Linux kernel >= 7.1.",
-                        mitigation="Use nvidia-fs/nvfs or compat mode.",
-                    )
-                ],
-            )
-        ]
+        with mock.patch.object(gds_report.iommu, "is_grace", return_value=False), \
+                mock.patch.object(gds_report.kernel, "_kernel_version", return_value=(7, 0, 0)):
+            verdict = gds_report._gdscheck_parse(GDSCHECK_NVME_C2C, "raid0", True)
 
-        old_run = gds_report._run_gdscheck_raw
-        old_raid = gds_report.get_raid_level
-        old_transport = gds_report.get_nvme_transport
-        old_grace = gds_report.iommu.is_grace
-        old_kernel = gds_report.kernel._kernel_version
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_C2C
-            gds_report.get_raid_level = lambda path: "raid0"
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            gds_report.iommu.is_grace = lambda: False
-            gds_report.kernel._kernel_version = lambda: (7, 0, 0)
-            text = gds_report._build_mode_support(reports, "ext4", "/raid")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.get_raid_level = old_raid
-            gds_report.get_nvme_transport = old_transport
-            gds_report.iommu.is_grace = old_grace
-            gds_report.kernel._kernel_version = old_kernel
-
-        self.assertIn("Not active", text)
-        self.assertIn("RAID0 P2PDMA requires NVIDIA Grace or Linux kernel >= 7.1", text)
-        p2pdma_line = self._mode_support_line(text, GDSMode.P2PDMA)
-        self.assertIn("Not active", p2pdma_line)
-        self.assertNotIn("Supported", p2pdma_line)
+        self.assertIs(verdict[GDSMode.P2PDMA], False)
 
     def test_raid0_p2pdma_token_is_supported_on_non_grace_kernel_7_1(self):
-        reports = [
-            ModeReport(
-                mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="RAID0 P2PDMA architecture",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.PASS,
-                        why="Linux kernel 7.1.0 detected.",
-                    )
-                ],
-            )
-        ]
+        with mock.patch.object(gds_report.iommu, "is_grace", return_value=False), \
+                mock.patch.object(gds_report.kernel, "_kernel_version", return_value=(7, 1, 0)):
+            verdict = gds_report._gdscheck_parse(GDSCHECK_NVME_C2C, "raid0", True)
 
-        old_run = gds_report._run_gdscheck_raw
-        old_raid = gds_report.get_raid_level
-        old_transport = gds_report.get_nvme_transport
-        old_grace = gds_report.iommu.is_grace
-        old_kernel = gds_report.kernel._kernel_version
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_C2C
-            gds_report.get_raid_level = lambda path: "raid0"
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            gds_report.iommu.is_grace = lambda: False
-            gds_report.kernel._kernel_version = lambda: (7, 1, 0)
-            text = gds_report._build_mode_support(reports, "ext4", "/raid")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.get_raid_level = old_raid
-            gds_report.get_nvme_transport = old_transport
-            gds_report.iommu.is_grace = old_grace
-            gds_report.kernel._kernel_version = old_kernel
-
-        self.assertNotIn("Not active", text)
-        self.assertNotIn("Grace-based only", text)
+        self.assertIs(verdict[GDSMode.P2PDMA], True)
 
     def test_raid0_p2pdma_token_is_supported_on_grace(self):
-        reports = [
-            ModeReport(
-                mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="RAID0 P2PDMA architecture",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.PASS,
-                        why="Grace platform detected.",
-                    )
-                ],
-            )
-        ]
+        with mock.patch.object(gds_report.iommu, "is_grace", return_value=True), \
+                mock.patch.object(gds_report.kernel, "_kernel_version", return_value=(6, 8, 0)):
+            verdict = gds_report._gdscheck_parse(GDSCHECK_NVME_C2C, "raid0", True)
 
-        old_run = gds_report._run_gdscheck_raw
-        old_raid = gds_report.get_raid_level
-        old_transport = gds_report.get_nvme_transport
-        old_grace = gds_report.iommu.is_grace
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_C2C
-            gds_report.get_raid_level = lambda path: "raid0"
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            gds_report.iommu.is_grace = lambda: True
-            text = gds_report._build_mode_support(reports, "ext4", "/raid")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.get_raid_level = old_raid
-            gds_report.get_nvme_transport = old_transport
-            gds_report.iommu.is_grace = old_grace
-
-        self.assertNotIn("Grace-based only", text)
+        self.assertIs(verdict[GDSMode.P2PDMA], True)
 
     def test_non_raid0_nvme_token_does_not_override_unsupported_raid_level(self):
+        def raid5_fail(mode):
+            return CheckResult(
+                check="RAID level GDS support",
+                mode=mode,
+                status=Status.FAIL,
+                why="RAID5 is not a supported direct GDS RAID route.",
+                mitigation="Use RAID0 or compat mode.",
+            )
+
         reports = [
-            ModeReport(
-                mode=GDSMode.NATIVE,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="RAID level GDS support",
-                        mode=GDSMode.NATIVE,
-                        status=Status.FAIL,
-                        why="RAID5 is not a supported direct GDS RAID route.",
-                        mitigation="Use RAID0 or compat mode.",
-                    )
-                ],
-            ),
-            ModeReport(
-                mode=GDSMode.P2PDMA,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="RAID level GDS support",
-                        mode=GDSMode.P2PDMA,
-                        status=Status.FAIL,
-                        why="RAID5 is not a supported direct GDS RAID route.",
-                        mitigation="Use RAID0 or compat mode.",
-                    )
-                ],
-            ),
+            ModeReport(mode=GDSMode.NATIVE, applicable=True, results=[raid5_fail(GDSMode.NATIVE)]),
+            ModeReport(mode=GDSMode.P2PDMA, applicable=True, results=[raid5_fail(GDSMode.P2PDMA)]),
         ]
 
-        old_run = gds_report._run_gdscheck_raw
-        old_raid = gds_report.get_raid_level
-        old_transport = gds_report.get_nvme_transport
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_C2C
-            gds_report.get_raid_level = lambda path: "raid5"
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            text = gds_report._build_mode_support(reports, "ext4", "/raid")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.get_raid_level = old_raid
-            gds_report.get_nvme_transport = old_transport
+        by_mode = self._enrich(
+            reports, GDSCHECK_NVME_C2C, "ext4", parse_fs_type="raid5", unsupported_raid_level="raid5"
+        )
 
-        self.assertIn("Not active", self._mode_support_line(text, GDSMode.NATIVE))
-        self.assertIn("Not active", self._mode_support_line(text, GDSMode.P2PDMA))
-        self.assertIn("RAID5 is not a supported direct GDS RAID route", text)
-        self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", text)
+        self.assertEqual(by_mode[GDSMode.NATIVE].status, Status.FAIL)
+        self.assertEqual(by_mode[GDSMode.P2PDMA].status, Status.FAIL)
+        for report in by_mode.values():
+            for r in report.results:
+                self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", r.why)
 
     def test_device_mapper_failure_suppresses_nvfs_available_info(self):
         # gdscheck sees native nvfs as active for ext4/NVMe, but the static
@@ -575,21 +395,13 @@ class GdsReportRenderingTests(unittest.TestCase):
             ModeReport(mode=GDSMode.P2PDMA, applicable=True, results=[dm_fail(GDSMode.P2PDMA)]),
         ]
 
-        old_run = gds_report._run_gdscheck_raw
-        old_transport = gds_report.get_nvme_transport
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_NVFS_ONLY
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            text = gds_report._build_mode_support(reports, "ext4", "/mnt/lv0")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.get_nvme_transport = old_transport
+        by_mode = self._enrich(reports, GDSCHECK_NVME_NVFS_ONLY, "ext4")
 
-        self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", text)
+        for r in self._gdscheck_results(by_mode[GDSMode.P2PDMA]):
+            self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", r.why)
 
     def test_lustre_accepts_ddn_exascaler_gdscheck_key(self):
-        reports = [
-            ModeReport(
+        reports = [ModeReport(
                 mode=GDSMode.NATIVE,
                 applicable=True,
                 results=[
@@ -600,46 +412,22 @@ class GdsReportRenderingTests(unittest.TestCase):
                         why="nvidia_fs loaded.",
                     )
                 ],
-            )
-        ]
+            )]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_DDN_EXASCALER
-            text = gds_report._build_mode_support(reports, "lustre", "/lustre")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_DDN_EXASCALER, "lustre", nvme_backed=False)
 
-        self.assertNotIn("No active Lustre or DDN EXAScaler client found by gdscheck", text)
+        self.assertIs(
+            gds_report._gdscheck_parse(GDSCHECK_DDN_EXASCALER, "lustre", False)[GDSMode.NATIVE], True
+        )
+        self.assertEqual(self._gdscheck_results(by_mode[GDSMode.NATIVE]), [])
 
-    def test_old_supported_status_renders_lustre_native_supported(self):
-        reports = [
-            ModeReport(
-                mode=GDSMode.NATIVE,
-                applicable=True,
-                results=[
-                    CheckResult(
-                        check="nvidia-fs module",
-                        mode=GDSMode.NATIVE,
-                        status=Status.PASS,
-                        why="nvidia_fs loaded.",
-                    )
-                ],
-            )
-        ]
+    def test_old_supported_status_marks_lustre_native_active(self):
+        verdict = gds_report._gdscheck_parse(GDSCHECK_DDN_EXASCALER_OLD_SUPPORTED, "lustre", False)
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_DDN_EXASCALER_OLD_SUPPORTED
-            text = gds_report._build_mode_support(reports, "lustre", "/lustre")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-
-        self.assertNotIn("Not active", text)
+        self.assertIs(verdict[GDSMode.NATIVE], True)
 
     def test_lustre_cannot_verify_mentions_lustre_and_ddn_exascaler(self):
-        reports = [
-            ModeReport(
+        reports = [ModeReport(
                 mode=GDSMode.NATIVE,
                 applicable=True,
                 results=[
@@ -650,18 +438,13 @@ class GdsReportRenderingTests(unittest.TestCase):
                         why="nvidia_fs loaded.",
                     )
                 ],
-            )
-        ]
+            )]
 
-        old_run = gds_report._run_gdscheck_raw
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_BEEGFS_ONLY
-            text = gds_report._build_mode_support(reports, "lustre", "/lustre")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
+        by_mode = self._enrich(reports, GDSCHECK_BEEGFS_ONLY, "lustre", nvme_backed=False)
 
-        self.assertIn("Cannot verify", text)
-        self.assertIn("No active Lustre or DDN EXAScaler client found by gdscheck", text)
+        results = self._gdscheck_results(by_mode[GDSMode.NATIVE])
+        self.assertEqual([r.check for r in results], ["gdscheck client detection"])
+        self.assertIn("No active Lustre or DDN EXAScaler client found by gdscheck", results[0].why)
 
     def test_nfs_p2pdma_is_not_applicable_and_rdma_is_checked(self):
         # NFS is Native-applicable (nvidia-fs/nvfs has to be loaded to activate
@@ -695,7 +478,7 @@ class GdsReportRenderingTests(unittest.TestCase):
                 why="Open driver.",
             )
             gds_report.nvidia_fs.check_p2pdma_driver_registries = lambda: self.fail("P2PDMA registry checks should not run for NFS")
-            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None: []
+            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: []
             gds_report.cufile_config.run_compat_checks = lambda: []
             gds_report.rdma.run_all = lambda fs_type: []
             gds_report._check_nfs_rdma_mount = lambda path: CheckResult(
@@ -795,7 +578,7 @@ class GdsReportRenderingTests(unittest.TestCase):
             )
             gds_report.nvidia_fs.check_p2pdma_driver_registries = lambda: None
             gds_report.nvidia_fs.run_all = lambda: []
-            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None: (
+            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: (
                 calls.append((fs_type, p2pdma_block_key)) or []
             )
             gds_report.cufile_config.run_compat_checks = lambda: []
@@ -847,7 +630,7 @@ class GdsReportRenderingTests(unittest.TestCase):
                 status=Status.PASS,
                 why="Open driver.",
             )
-            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None: []
+            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: []
             gds_report.cufile_config.run_compat_checks = lambda: []
             gds_report.check_odirect = lambda path: (True, "O_DIRECT ok")
             gds_report.check_ext4_data_mode = lambda path: (
@@ -894,27 +677,12 @@ class GdsReportRenderingTests(unittest.TestCase):
                 ],
             )
         ]
-        old_run = gds_report._run_gdscheck_raw
-        old_nvme = gds_report.is_nvme_backed
-        old_transport = gds_report.get_nvme_transport
-        old_raid = gds_report.get_raid_level
-        try:
-            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_NVFS_ONLY
-            gds_report.is_nvme_backed = lambda path: True
-            gds_report.get_nvme_transport = lambda path: "pcie"
-            gds_report.get_raid_level = lambda path: None
 
-            text = gds_report._build_mode_support(reports, "ext4", "/")
-        finally:
-            gds_report._run_gdscheck_raw = old_run
-            gds_report.is_nvme_backed = old_nvme
-            gds_report.get_nvme_transport = old_transport
-            gds_report.get_raid_level = old_raid
+        by_mode = self._enrich(reports, GDSCHECK_NVME_NVFS_ONLY, "ext4")
 
-        self.assertIn("Native GDS", text)
-        self.assertIn("Not active", text)
-        self.assertIn("rootflags=data=ordered", text)
-        self.assertNotIn("Supported", self._mode_support_line(text, GDSMode.NATIVE))
+        native = by_mode[GDSMode.NATIVE]
+        self.assertEqual(native.status, Status.FAIL)
+        self.assertIn("rootflags=data=ordered", native.blockers()[0].mitigation)
 
     def test_ext4_explicit_data_ordered_passes_native_gds_check(self):
         old_kernel = gds_report.kernel.run_all
@@ -938,7 +706,7 @@ class GdsReportRenderingTests(unittest.TestCase):
                 status=Status.PASS,
                 why="Open driver.",
             )
-            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None: []
+            gds_report.cufile_config.run_all = lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: []
             gds_report.cufile_config.run_compat_checks = lambda: []
             gds_report.check_odirect = lambda path: (True, "O_DIRECT ok")
             gds_report.check_ext4_data_mode = lambda path: (

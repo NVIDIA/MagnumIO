@@ -11,8 +11,13 @@ filesystem-specific logic that changes with fs_type.
 
 import pytest
 
+from checks import cufile_config
 from checks.gds_report import build_mode_reports
 from checks.result import CheckResult, GDSMode, Status
+
+# Captured before the gds_infrastructure fixture replaces it, for tests that
+# need the real cufile.json checks.
+_real_cufile_run_all = cufile_config.run_all
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +375,23 @@ class TestVirtioFS:
         build_mode_reports("/mnt/virtiofs", "virtiofs")
         assert check_acs_called, "pcie.check_acs() should be called for virtiofs"
 
+    def test_fs_key_without_global_key_fails_p2pdma(self, gds_infrastructure, monkeypatch):
+        monkeypatch.setattr("checks.cufile_config.run_all", _real_cufile_run_all)
+        # File-only scenario: ignore any CUFILE_* overrides in the caller's environment.
+        monkeypatch.setattr("checks.cufile_config._env_override_map", lambda: {})
+        monkeypatch.setattr(
+            "checks.cufile_config._load_cufile_json",
+            lambda: {
+                "properties": {"use_pci_p2pdma": False},
+                "fs": {"virtiofs": {"use_pci_p2pdma": True}},
+            },
+        )
+        reports = build_mode_reports("/mnt/virtiofs", "virtiofs")
+        result = _find(_by_mode(reports)[GDSMode.P2PDMA], "P2PDMA config key")
+        assert result is not None
+        assert result.status == Status.FAIL
+        assert "properties.use_pci_p2pdma = False" in result.why
+
 
 # ---------------------------------------------------------------------------
 # NVMe-oF
@@ -398,7 +420,7 @@ class TestNVMeOF:
         calls = []
         monkeypatch.setattr(
             "checks.cufile_config.run_all",
-            lambda fs_type, p2pdma_block_key=None: calls.append((fs_type, p2pdma_block_key)) or [],
+            lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: calls.append((fs_type, p2pdma_block_key)) or [],
         )
         monkeypatch.setattr("checks.gds_report.get_nvme_transport", lambda path: "rdma")
         build_mode_reports("/mnt/data", "ext4")

@@ -845,7 +845,7 @@ def _collect_sections(verbose: bool) -> dict[str, list]:
 
     # --- cufile.json ---
     cufile_results = cufile_config.run_compat_checks() + [
-        result for result in cufile_config.run_all("ext4")
+        result for result in cufile_config.run_all("ext4", gdscheck_output=gds_raw)
         if result.mode != GDSMode.P2PDMA
     ]
     sections["cufile.json"] = cufile_results

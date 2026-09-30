@@ -362,6 +362,27 @@ def _load_cufile_config_from_gdscheck(apply_env: bool = True) -> tuple[Optional[
     return config, path, None
 
 
+def _merge_effective_config(
+    file_config: Optional[dict],
+    gdscheck_config: Optional[dict],
+    env_overrides: dict[str, tuple[Any, str]],
+) -> Optional[dict]:
+    """
+    Resolve the cuFile configuration the library actually uses.
+
+    Precedence, lowest to highest: the cufile.json file, gdscheck's CUFILE
+    CONFIGURATION (the library's loaded view, including defaults and CUFILE_*
+    environment overrides, but not every key), then CUFILE_* environment
+    overrides from ENV_OVERRIDES (needed when gdscheck is unavailable).
+    """
+    effective = _deep_merge_config(file_config, gdscheck_config)
+    if effective is None and env_overrides:
+        effective = {}
+    for dotted, (value, _env_name) in env_overrides.items():
+        _set_dotted(effective, dotted, value)
+    return effective
+
+
 def _coerce_env_value(value: str, value_type: str) -> Any:
     if value_type == "bool":
         return value.strip().lower() in ("1", "true", "yes", "on")
@@ -927,11 +948,13 @@ def audit_config(
     entries: list[dict[str, Any]] = []
     known_paths = _schema_known_paths()
     gpu_memory_totals_kb: Optional[list[int]] = None
-    effective_config = (
-        _deep_merge_config(file_fallback_config, config)
-        if config_source == "gdscheck"
-        else copy.deepcopy(config) if isinstance(config, dict) else config
-    )
+    if isinstance(config, dict) and "_parse_error" in config:
+        # Keep the parse-error marker; downstream helpers check for it.
+        effective_config = copy.deepcopy(config)
+    elif config_source == "gdscheck":
+        effective_config = _merge_effective_config(file_fallback_config, config, env_overrides)
+    else:
+        effective_config = _merge_effective_config(config, None, env_overrides)
 
     for item in CONFIG_SCHEMA:
         profiles = item.get("profiles", ["all"])
@@ -953,8 +976,6 @@ def audit_config(
         if item["path"] in env_overrides:
             value, env_name = env_overrides[item["path"]]
             source = f"env:{env_name}"
-            if isinstance(effective_config, dict) and "_parse_error" not in effective_config:
-                _set_dotted(effective_config, item["path"], value)
 
         status = "OK"
         recommendation = ""
@@ -1407,7 +1428,9 @@ def check_weka_write_support(config: Optional[dict] = None) -> CheckResult:
 def check_p2pdma_config_for_fs(fs_type: str, config: dict) -> CheckResult:
     """
     For filesystems where P2PDMA/C2C requires an explicit filesystem-specific
-    config key (currently NFS and virtiofs), check whether it is enabled.
+    config key (currently virtiofs), check that both the global
+    properties.use_pci_p2pdma key and the filesystem key are enabled. The GDS
+    library only activates the route when both are true.
     """
     from .fs_matrix import P2PDMA_CONFIG_KEY
 
@@ -1418,43 +1441,53 @@ def check_p2pdma_config_for_fs(fs_type: str, config: dict) -> CheckResult:
             why=f"P2PDMA/C2C for {fs_type} does not require a filesystem-specific cufile.json key.",
         )
 
-    # Navigate dotted key like "fs.lustre.use_pci_p2pdma"
-    parts = config_key.split(".")
-    node: Any = config
-    for part in parts:
-        if not isinstance(node, dict):
-            node = None
-            break
-        node = node.get(part)
+    def _lookup(dotted_key: str) -> Any:
+        node: Any = config
+        for part in dotted_key.split("."):
+            if not isinstance(node, dict):
+                return None
+            node = node.get(part)
+        return node
 
-    if node is True:
+    values = {
+        "properties.use_pci_p2pdma": _lookup("properties.use_pci_p2pdma"),
+        config_key: _lookup(config_key),
+    }
+    evidence = "; ".join(f"{key} = {val!r}" for key, val in values.items())
+    issues = [
+        f"{key} = {'missing' if val is None else repr(val)}"
+        for key, val in values.items()
+        if val is not True
+    ]
+
+    if not issues:
         return CheckResult(
             check="P2PDMA config key", mode=GDSMode.P2PDMA, status=Status.PASS,
-            why=f"'{config_key}': true found in cufile.json — P2PDMA/C2C enabled for {fs_type}.",
-            evidence=f"{config_key} = {node}",
+            why=(
+                f"'properties.use_pci_p2pdma' and '{config_key}' are both true in "
+                f"the effective cuFile configuration — P2PDMA/C2C enabled for {fs_type}."
+            ),
+            evidence=evidence,
         )
 
     return CheckResult(
         check="P2PDMA config key", mode=GDSMode.P2PDMA, status=Status.FAIL,
         why=(
-            f"P2PDMA/C2C for {fs_type} requires '{config_key}': true in /etc/cufile.json, "
-            f"but it is currently {'missing' if node is None else repr(node)}. "
-            "Without this, the direct P2P path is not attempted for this filesystem."
+            f"P2PDMA/C2C for {fs_type} requires both 'properties.use_pci_p2pdma' and "
+            f"'{config_key}' to be true in the effective cuFile configuration, but "
+            f"{', '.join(issues)}. "
+            "Without both, the direct P2P path is not attempted for this filesystem."
         ),
         mitigation=(
-            f"Add or update /etc/cufile.json:\n"
-            f'{{\n'
-            f'  "fs": {{\n'
-            f'    "{fs_type}": {{\n'
-            f'      "use_pci_p2pdma": true\n'
-            f'    }}\n'
-            f'  }}\n'
-            f'}}\n\n'
+            f"Set both to true in /etc/cufile.json:\n"
+            f'  "properties": {{ "use_pci_p2pdma": true }}\n'
+            f'  "fs": {{ "{fs_type}": {{ "use_pci_p2pdma": true }} }}\n'
+            "CUFILE_USE_PCIP2PDMA in the environment overrides properties.use_pci_p2pdma.\n\n"
             f"Also ensure the hard direct-P2P requirements are met (IOMMU passthrough/off "
             f"where required for x86 PCIe P2PDMA, ACS redirect disabled for PCIe paths, "
             f"and close topology for performance). {P2P_C2C_DIRECT_PATH_NOTE}"
         ),
-        evidence=f"{config_key} = {node!r}",
+        evidence=evidence,
     )
 
 
@@ -1503,13 +1536,14 @@ def _check_nvme_p2pdma_settings(config: dict, block_key: str = "nvme") -> list[C
             mode=GDSMode.P2PDMA,
             status=Status.FAIL,
             why=(
-                f"P2PDMA/C2C is disabled in /etc/cufile.json: {', '.join(issues)}. "
+                f"P2PDMA/C2C is disabled in the effective cuFile configuration: {', '.join(issues)}. "
                 "Both settings must be true for the direct P2P path to activate."
             ),
             mitigation=(
                 "Set both to true in /etc/cufile.json:\n"
                 '  "properties": { "use_pci_p2pdma": true }\n'
                 f'  "block": {{ "{block_key}": {{ "use_pci_p2pdma": true }} }}\n'
+                "CUFILE_USE_PCIP2PDMA in the environment overrides properties.use_pci_p2pdma.\n"
                 f"{P2P_C2C_DIRECT_PATH_NOTE}"
             ),
             evidence="; ".join(issues),
@@ -1520,17 +1554,25 @@ def _check_nvme_p2pdma_settings(config: dict, block_key: str = "nvme") -> list[C
         mode=GDSMode.P2PDMA,
         status=Status.PASS,
         why=(
-            f"P2PDMA/C2C enabled in cufile.json: "
+            f"P2PDMA/C2C enabled in the effective cuFile configuration: "
             f"properties.use_pci_p2pdma=true, block.{block_key}.use_pci_p2pdma=true. "
             f"{P2P_C2C_DIRECT_PATH_NOTE}"
         ),
     )]
 
 
-def run_all(fs_type: str, p2pdma_block_key: Optional[str] = None) -> list[CheckResult]:
+def run_all(
+    fs_type: str,
+    p2pdma_block_key: Optional[str] = None,
+    gdscheck_output: Optional[str] = None,
+) -> list[CheckResult]:
     """
     Checks for Native GDS / P2PDMA/C2C modes — cufile.json settings that affect acceleration.
     Does NOT include compat mode checks; use check_allow_compat_mode() for that.
+
+    File presence and parse errors are reported against the file itself; the
+    setting checks use the effective configuration (see _merge_effective_config),
+    so pass gdscheck -p output when the caller already has it.
     """
     config = _load_cufile_json()
     results: list[CheckResult] = []
@@ -1549,14 +1591,22 @@ def run_all(fs_type: str, p2pdma_block_key: Optional[str] = None) -> list[CheckR
                 "Then edit to enable P2PDMA/C2C for your filesystem if applicable."
             ),
         ))
-        return results
-
-    if "_parse_error" in config:
+    elif "_parse_error" in config:
         results.append(CheckResult(
             check="cufile.json", mode=GDSMode.NATIVE, status=Status.FAIL,
             why=f"cufile.json at {config.get('_path')} has a JSON parse error: {config['_parse_error']}",
             mitigation="Validate the file: python3 -m json.tool /etc/cufile.json",
         ))
+        return results
+
+    # Even with no cufile.json, gdscheck and CUFILE_* environment variables can
+    # still supply the effective configuration, so keep checking it.
+    config = _merge_effective_config(
+        config,
+        _parse_gdscheck_cufile_config(gdscheck_output) if gdscheck_output else None,
+        _env_override_map(),
+    )
+    if config is None:
         return results
 
     # force_compat_mode bypasses GDS acceleration (WARN — compat IS active, acceleration is not)

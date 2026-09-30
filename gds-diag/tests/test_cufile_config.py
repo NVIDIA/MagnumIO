@@ -3,6 +3,7 @@
 
 import os
 import unittest
+from unittest import mock
 import tempfile
 from pathlib import Path
 
@@ -1032,6 +1033,151 @@ class WekaWriteSupportTests(unittest.TestCase):
         finally:
             cufile_config._load_cufile_json_with_path = old_loader
         self.assertEqual(result.status, "INFO")
+
+
+class P2pdmaConfigForFsTests(unittest.TestCase):
+    """virtiofs P2PDMA/C2C needs both properties.use_pci_p2pdma and fs.virtiofs.use_pci_p2pdma."""
+
+    def _check(self, properties, fs_key):
+        config = {}
+        if properties is not None:
+            config["properties"] = {"use_pci_p2pdma": properties}
+        if fs_key is not None:
+            config["fs"] = {"virtiofs": {"use_pci_p2pdma": fs_key}}
+        return cufile_config.check_p2pdma_config_for_fs("virtiofs", config)
+
+    def test_both_keys_true_passes(self):
+        self.assertEqual(self._check(True, True).status, "PASS")
+
+    def test_fs_key_alone_fails_on_properties_key(self):
+        result = self._check(False, True)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("properties.use_pci_p2pdma = False", result.why)
+        self.assertNotIn("fs.virtiofs.use_pci_p2pdma =", result.why)
+
+    def test_properties_key_alone_fails_on_fs_key(self):
+        result = self._check(True, None)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("fs.virtiofs.use_pci_p2pdma = missing", result.why)
+        self.assertNotIn("properties.use_pci_p2pdma =", result.why)
+
+    def test_neither_key_set_names_both(self):
+        result = self._check(None, None)
+        self.assertEqual(result.status, "FAIL")
+        self.assertIn("properties.use_pci_p2pdma = missing", result.why)
+        self.assertIn("fs.virtiofs.use_pci_p2pdma = missing", result.why)
+        self.assertIn('"properties": { "use_pci_p2pdma": true }', result.mitigation)
+        self.assertIn('"fs": { "virtiofs": { "use_pci_p2pdma": true } }', result.mitigation)
+
+
+class EffectiveConfigTests(unittest.TestCase):
+    """run_all() checks the effective cuFile configuration, not only the file."""
+
+    FILE_P2P_OFF = {
+        "properties": {"use_pci_p2pdma": False, "force_compat_mode": True},
+        "block": {"nvme": {"use_pci_p2pdma": True}},
+        "logging": {"level": "ERROR"},
+    }
+    GDSCHECK_P2P_ON = (
+        "CUFILE CONFIGURATION:\n"
+        "=====================\n"
+        " properties.use_pci_p2pdma : true\n"
+        " properties.force_compat_mode : false\n"
+        " block.nvme.use_pci_p2pdma : true\n"
+        "=====================\n"
+    )
+
+    def _env(self, **overrides):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CUFILE_")}
+        env.update(overrides)
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def _run_all(self, gdscheck_output=None, file_config=FILE_P2P_OFF, **env):
+        with self._env(**env), \
+                mock.patch.object(cufile_config, "_load_cufile_json", return_value=file_config):
+            results = cufile_config.run_all("ext4", gdscheck_output=gdscheck_output)
+        return {r.check: r for r in results}
+
+    def test_merge_precedence_file_then_gdscheck_then_env(self):
+        merged = cufile_config._merge_effective_config(
+            {"properties": {"use_pci_p2pdma": False, "io_priority": "high"}},
+            {"properties": {"use_pci_p2pdma": True, "force_compat_mode": False}},
+            {"properties.force_compat_mode": (True, "CUFILE_FORCE_COMPAT_MODE")},
+        )
+        self.assertEqual(
+            merged["properties"],
+            {"use_pci_p2pdma": True, "io_priority": "high", "force_compat_mode": True},
+        )
+
+    def test_config_audit_uses_the_shared_merge(self):
+        # mount-check/post-install (run_all) and config-audit must resolve the
+        # effective configuration the same way; both go through one helper.
+        gdscheck_config = {"properties": {"use_pci_p2pdma": True}}
+        real_merge = cufile_config._merge_effective_config
+        with self._env(CUFILE_FORCE_COMPAT_MODE="false"), \
+                mock.patch.object(
+                    cufile_config, "_load_cufile_config_from_gdscheck",
+                    return_value=(gdscheck_config, "/fake/gdscheck", None),
+                ), \
+                mock.patch.object(
+                    cufile_config, "_load_cufile_json_with_path",
+                    return_value=(self.FILE_P2P_OFF, "/etc/cufile.json"),
+                ), \
+                mock.patch.object(cufile_config, "_merge_effective_config", wraps=real_merge) as merge:
+            cufile_config.audit_config(profile="compat-safe")
+
+        merge.assert_called_once_with(
+            self.FILE_P2P_OFF,
+            gdscheck_config,
+            {"properties.force_compat_mode": (False, "CUFILE_FORCE_COMPAT_MODE")},
+        )
+
+    def test_file_only_behavior_is_unchanged_without_gdscheck_or_env(self):
+        results = self._run_all()
+        self.assertEqual(results["cufile.json P2PDMA settings"].status, "FAIL")
+        self.assertEqual(results["cufile.json force_compat_mode"].status, "WARN")
+
+    def test_gdscheck_values_override_the_file(self):
+        results = self._run_all(gdscheck_output=self.GDSCHECK_P2P_ON)
+        self.assertEqual(results["cufile.json P2PDMA settings"].status, "PASS")
+        self.assertNotIn("cufile.json force_compat_mode", results)
+
+    def test_env_override_applies_when_gdscheck_is_unavailable(self):
+        results = self._run_all(CUFILE_USE_PCIP2PDMA="true")
+        self.assertEqual(results["cufile.json P2PDMA settings"].status, "PASS")
+
+    def test_missing_file_without_other_sources_only_warns(self):
+        results = self._run_all(file_config=None)
+        self.assertEqual(list(results), ["cufile.json"])
+        self.assertEqual(results["cufile.json"].status, "WARN")
+
+    def test_missing_file_still_checks_gdscheck_config(self):
+        results = self._run_all(gdscheck_output=self.GDSCHECK_P2P_ON, file_config=None)
+        self.assertEqual(results["cufile.json"].status, "WARN")
+        self.assertEqual(results["cufile.json P2PDMA settings"].status, "PASS")
+
+    def test_missing_file_still_reports_gdscheck_p2pdma_disabled(self):
+        gdscheck_off = self.GDSCHECK_P2P_ON.replace(
+            "properties.use_pci_p2pdma : true", "properties.use_pci_p2pdma : false"
+        )
+        results = self._run_all(gdscheck_output=gdscheck_off, file_config=None)
+        self.assertEqual(results["cufile.json"].status, "WARN")
+        self.assertEqual(results["cufile.json P2PDMA settings"].status, "FAIL")
+
+    def test_missing_file_still_applies_env_overrides(self):
+        results = self._run_all(file_config=None, CUFILE_USE_PCIP2PDMA="true", CUFILE_FORCE_COMPAT_MODE="true")
+        self.assertEqual(results["cufile.json"].status, "WARN")
+        self.assertIn("CUFILE_FORCE_COMPAT_MODE env var", results)
+        # The override satisfies properties.use_pci_p2pdma; only the (unset)
+        # block key is still reported.
+        p2pdma = results["cufile.json P2PDMA settings"]
+        self.assertIn("block.nvme.use_pci_p2pdma", p2pdma.why)
+        self.assertNotIn("properties.use_pci_p2pdma =", p2pdma.why)
+
+    def test_env_force_compat_false_overrides_file(self):
+        results = self._run_all(CUFILE_FORCE_COMPAT_MODE="false")
+        self.assertNotIn("cufile.json force_compat_mode", results)
+        self.assertNotIn("CUFILE_FORCE_COMPAT_MODE env var", results)
 
 
 if __name__ == "__main__":

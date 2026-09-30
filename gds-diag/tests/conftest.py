@@ -40,7 +40,7 @@ def gds_infrastructure(monkeypatch):
     monkeypatch.setattr("checks.gds_report._run_gdscheck_raw", lambda: None)
 
     monkeypatch.setattr(
-        "checks.cufile_config.run_all", lambda fs_type, p2pdma_block_key=None: []
+        "checks.cufile_config.run_all", lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: []
     )
     monkeypatch.setattr("checks.cufile_config.run_compat_checks", lambda: [])
     monkeypatch.setattr(
