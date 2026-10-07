@@ -557,6 +557,36 @@ class GdsReportRenderingTests(unittest.TestCase):
         self.assertIn("RAID5 is not a supported direct GDS RAID route", text)
         self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", text)
 
+    def test_device_mapper_failure_suppresses_nvfs_available_info(self):
+        # gdscheck sees native nvfs as active for ext4/NVMe, but the static
+        # device-mapper FAIL in the Native report means nvfs is not actually
+        # available for this mount, so the INFO must not claim it is.
+        def dm_fail(mode):
+            return CheckResult(
+                check="Device-mapper backing device",
+                mode=mode,
+                status=Status.FAIL,
+                why="Backed by device-mapper (LVM).",
+                mitigation="Remove the device-mapper layer.",
+            )
+
+        reports = [
+            ModeReport(mode=GDSMode.NATIVE, applicable=True, results=[dm_fail(GDSMode.NATIVE)]),
+            ModeReport(mode=GDSMode.P2PDMA, applicable=True, results=[dm_fail(GDSMode.P2PDMA)]),
+        ]
+
+        old_run = gds_report._run_gdscheck_raw
+        old_transport = gds_report.get_nvme_transport
+        try:
+            gds_report._run_gdscheck_raw = lambda: GDSCHECK_NVME_NVFS_ONLY
+            gds_report.get_nvme_transport = lambda path: "pcie"
+            text = gds_report._build_mode_support(reports, "ext4", "/mnt/lv0")
+        finally:
+            gds_report._run_gdscheck_raw = old_run
+            gds_report.get_nvme_transport = old_transport
+
+        self.assertNotIn("Direct GDS is still available via nvidia-fs/nvfs", text)
+
     def test_lustre_accepts_ddn_exascaler_gdscheck_key(self):
         reports = [
             ModeReport(

@@ -509,6 +509,16 @@ def get_backing_device(path: str) -> Optional[str]:
     return None
 
 
+def _sysfs_block_name(device: str) -> str:
+    """
+    Return the /sys/class/block name for a device path.
+
+    Device-mapper nodes such as /dev/mapper/vg0-lv0 are symlinks to /dev/dm-N,
+    and only the dm-N name exists in sysfs, so resolve symlinks first.
+    """
+    return os.path.basename(os.path.realpath(device))
+
+
 def _nvme_controller_from_device(device: str) -> Optional[str]:
     name = os.path.basename(device)
     m = re.match(r"^(nvme\d+)n\d+(p\d+)?$", name)
@@ -578,8 +588,72 @@ def get_raid_level(path: str) -> Optional[str]:
     device = get_backing_device(path)
     if not device:
         return None
-    levels = _block_device_raid_levels(os.path.basename(device))
+    levels = _block_device_raid_levels(_sysfs_block_name(device))
     return levels[0] if levels else None
+
+
+def _classify_dm_uuid(uuid: str) -> str:
+    """
+    Classify a device-mapper UUID prefix into a human-readable kind.
+
+    DM_UUID is set by whichever userspace tool built the table (LVM,
+    cryptsetup, multipath-tools, mdadm's dm-raid target) — dm itself does not
+    require or validate any particular format, and a device created with a
+    bare `dmsetup create` (no --uuid) has an empty uuid. Treat these prefixes
+    as a best-effort label, not a detection signal: detection is the caller's
+    job, based on the dm/ sysfs directory existing at all.
+    """
+    if uuid.startswith("LVM-"):
+        return "LVM"
+    if uuid.startswith("mpath-"):
+        return "device-mapper multipath"
+    if uuid.startswith(("CRYPT-", "crypt-")):
+        return "dm-crypt"
+    if uuid.startswith("RAID-"):
+        return "dm-raid"
+    return "device-mapper"
+
+
+def _block_device_dm_info(device_name: str, seen: Optional[set[str]] = None) -> list[str]:
+    """Return device-mapper kinds (e.g. LVM, dm-crypt) found at this block device or below it."""
+    if seen is None:
+        seen = set()
+    name = os.path.basename(device_name)
+    if not name or name in seen:
+        return []
+    seen.add(name)
+
+    kinds: list[str] = []
+    dm_dir = f"/sys/class/block/{name}/dm"
+    if os.path.isdir(dm_dir):
+        # dm/ is created by the device-mapper core for every dm device
+        # regardless of target type or uuid content, so its presence alone
+        # is proof of device-mapper; only the label below depends on uuid.
+        uuid = ""
+        try:
+            with open(f"{dm_dir}/uuid") as fh:
+                uuid = fh.read().strip()
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+        kinds.append(_classify_dm_uuid(uuid))
+
+    slaves_dir = f"/sys/class/block/{name}/slaves"
+    try:
+        slaves = os.listdir(slaves_dir)
+    except (FileNotFoundError, PermissionError, OSError):
+        slaves = []
+    for slave in slaves:
+        kinds.extend(_block_device_dm_info(slave, seen))
+    return kinds
+
+
+def get_dm_info(path: str) -> Optional[str]:
+    """Return the device-mapper kind backing a path (e.g. LVM, dm-crypt), if any."""
+    device = get_backing_device(path)
+    if not device:
+        return None
+    kinds = _block_device_dm_info(_sysfs_block_name(device))
+    return kinds[0] if kinds else None
 
 
 def get_nvme_transport(path: str) -> Optional[str]:
@@ -610,7 +684,7 @@ def get_nvme_transport(path: str) -> Optional[str]:
 def is_nvme_backed(path: str) -> bool:
     """Return True if path resides on an NVMe device."""
     device = get_backing_device(path)
-    return bool(device and _block_device_has_nvme_leaf(os.path.basename(device)))
+    return bool(device and _block_device_has_nvme_leaf(_sysfs_block_name(device)))
 
 
 def check_ext4_data_mode(path: str) -> Optional[tuple[str, str]]:
