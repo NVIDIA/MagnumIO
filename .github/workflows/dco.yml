@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: DCO
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: Developer Certificate of Origin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          failed=0
+          for sha in $(git log --no-merges --format=%H "${BASE_SHA}..${HEAD_SHA}"); do
+            if ! git log -1 --format=%B "$sha" | git interpret-trailers --parse \
+                 | grep -Eq '^Signed-off-by: .+ <[^<>@[:space:]]+@[^<>@[:space:]]+>$'; then
+              echo "::error::Commit $sha is missing a Signed-off-by line"
+              git log -1 --format='  %h %an <%ae>: %s' "$sha"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo
+            echo "All commits must be signed off (see CONTRIBUTING.md)."
+            echo "To sign off every commit in the PR:"
+            echo "  git rebase --signoff <base-branch>"
+            echo "To sign off only the most recent commit:"
+            echo "  git commit --amend -s --no-edit"
+            echo "Either way the commits are rewritten, so update the PR with:"
+            echo "  git push --force-with-lease"
+            exit 1
+          fi
+          echo "All commits carry a Signed-off-by line."
