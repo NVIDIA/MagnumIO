@@ -63,6 +63,27 @@ This project intentionally uses only the Python standard library for the main
 CLI path. Do not add package dependencies unless the user explicitly accepts the
 tradeoff and the dependency is isolated from basic command dispatch.
 
+## Python Version Compatibility
+
+The documented minimum is Python 3.8 (see `README.md`), and CI runs the test
+suite on 3.8 as well as newer versions. Keep both the CLI and the tests
+working on 3.8 unless doing so would require an extraordinary compromise. If
+it would, stop and ask the user for a decision before raising the floor,
+dropping a CI version, or contorting the code; do not decide this
+unilaterally.
+
+Common pitfalls when writing 3.9+ code that breaks 3.8:
+
+- Start every Python file with `from __future__ import annotations`, including
+  tests, so annotations are not evaluated at import time.
+- Even with that import, annotations are only safe: do not use builtin
+  generics (`list[str]`, `dict[str, int]`, `tuple[...]`) or `X | Y` unions in
+  runtime expressions such as type aliases, `isinstance`, `cast`, or
+  dataclass/`NamedTuple` field defaults. Use `typing.List`, `typing.Optional`,
+  and similar there.
+- Avoid APIs newer than 3.8, such as `str.removeprefix`/`removesuffix`,
+  `functools.cache`, `zip(strict=)`, `math.lcm`, and `match` statements.
+
 ## Licensing
 
 This directory is part of the Magnum IO repository and is distributed under
