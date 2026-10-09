@@ -431,6 +431,21 @@ DRIVER CONFIGURATION:
             post_install._run_gdscheck_raw = old_run
             post_install._collect_p2pdma_sections = old_p2p
 
+    def test_cufile_checks_receive_gdscheck_output(self):
+        from checks import cufile_config
+
+        calls = []
+        old_run_all = cufile_config.run_all
+        try:
+            cufile_config.run_all = lambda fs_type, p2pdma_block_key=None, gdscheck_output=None: (
+                calls.append(gdscheck_output) or []
+            )
+            self._collect_sections_with_gdscheck_output(GDSCHECK_DRIVER_CONFIG)
+        finally:
+            cufile_config.run_all = old_run_all
+
+        self.assertEqual(calls, [GDSCHECK_DRIVER_CONFIG])
+
     def test_gdscheck_iommu_warning_includes_grub_mitigation_when_strict(self):
         gds_raw_with_iommu_warning = (
             GDSCHECK_DRIVER_CONFIG
