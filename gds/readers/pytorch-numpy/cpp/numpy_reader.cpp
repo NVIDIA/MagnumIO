@@ -531,6 +531,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   npr.def("disable_p2p", &NumpyReader::DisableP2P);
   
   //loader
-  npr.def("get_sample", &NumpyReader::getSample, py::arg("element_id") );
-  npr.def("get_batch", &NumpyReader::getBatch, py::arg("element_ids") );
+  npr.def("get_sample", &NumpyReader::getSample, py::arg("element_id"), py::call_guard<py::gil_scoped_release>());
+  npr.def("get_batch", &NumpyReader::getBatch, py::arg("element_ids"), py::call_guard<py::gil_scoped_release>());
 }
