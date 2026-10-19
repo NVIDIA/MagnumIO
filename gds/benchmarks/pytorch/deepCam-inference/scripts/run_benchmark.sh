@@ -83,10 +83,10 @@ elif [ "${mode}" == "training" ]; then
     args="${common_args} --preprocess --mode=train"
     tags="${common_tags}-preprocess-train${padtag}${memmaptag}"
 elif [ "${mode}" == "io" ]; then
-    args="${devarg} ${memmaparg} --drop_fs_cache"
+    args="${devarg} ${memmaparg} --drop_fs_cache --mode=io"
     tags="nocache${padtag}${memmaptag}"
 elif [ "${mode}" == "io-cache" ]; then
-    args="${devarg} ${memmaparg}"
+    args="${devarg} ${memmaparg} --mode=io"
     tags="${padtag}${memmaptag}"
 fi
 
