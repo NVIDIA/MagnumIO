@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import os
 import unittest
 from unittest import mock
@@ -174,7 +175,9 @@ CUFILE CONFIGURATION:
     "raid10": {"use_pci_p2pdma": false}
   },
   "miscellaneous": {
-    "rdma_token_reset_timeout_secs": 30
+    "rdma_token_reset_timeout_secs": 30,
+    "enable_static_config": false,
+    "static_config_filepath": "/etc/cufile-static-config.json"
   }
 }
 """,
@@ -197,6 +200,8 @@ CUFILE CONFIGURATION:
             "block.raid1.use_pci_p2pdma",
             "block.raid10.use_pci_p2pdma",
             "miscellaneous.rdma_token_reset_timeout_secs",
+            "miscellaneous.enable_static_config",
+            "miscellaneous.static_config_filepath",
         ):
             self.assertIn(path, entries)
             self.assertNotEqual(entries[path]["risk"], "Unknown cufile.json key for this tool's documented schema")
@@ -494,6 +499,36 @@ CUFILE CONFIGURATION:
         self.assertEqual(by_path["fs.gpfs.rdma_dev_addr_list"]["value"], ["192.168.4.201"])
         self.assertNotIn("expected a list", by_path["fs.gpfs.rdma_dev_addr_list"]["risk"])
 
+    def test_config_without_newer_keys_still_audits_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "cufile.json"
+            config_path.write_text('{"logging": {"level": "ERROR"}, "miscellaneous": {}}', encoding="utf-8")
+            audit = cufile_config.audit_config(
+                config_path=str(config_path),
+                apply_env=False,
+                prefer_gdscheck=False,
+            )
+        self.assertFalse([e for e in audit["entries"] if e["scope"] == "unknown"])
+        entries = {e["path"]: e for e in audit["entries"]}
+        self.assertEqual(entries["miscellaneous.enable_static_config"]["status"], "OK")
+        self.assertEqual(entries["miscellaneous.static_config_filepath"]["status"], "OK")
+
+    def test_other_library_parsed_keys_are_not_unknown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "cufile.json"
+            config_path.write_text(
+                '{"fs": {"panfs": {"mount_table": {"/mnt/p": {"rdma_dev_addr_list": ["10.0.0.1"]}}},'
+                ' "scatefs": {"mount_table": {}}}, "logging": {"max_file_size_mb": 32},'
+                ' "properties": {"allow_system_memory": false, "rdma_service_level": 0}}',
+                encoding="utf-8",
+            )
+            audit = cufile_config.audit_config(
+                config_path=str(config_path),
+                apply_env=False,
+                prefer_gdscheck=False,
+            )
+        self.assertEqual([e["path"] for e in audit["entries"] if e["scope"] == "unknown"], [])
+
     def test_rdma_multipath_knobs_are_ignored_for_now(self):
         old_loader = cufile_config._load_cufile_json_with_path
         try:
@@ -762,6 +797,31 @@ CUFILE CONFIGURATION:
         ]
         self.assertEqual(derived[0]["status"], "WARN")
         self.assertIn("topology file is missing", derived[0]["risk"])
+
+    def _static_config_warnings(self, misc):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "cufile.json"
+            config_path.write_text(json.dumps({"miscellaneous": misc}), encoding="utf-8")
+            audit = cufile_config.audit_config(
+                config_path=str(config_path), apply_env=False, prefer_gdscheck=False,
+            )
+        return [
+            e for e in audit["entries"]
+            if e["path"] == "miscellaneous.static_config_filepath" and e["status"] == "WARN"
+        ]
+
+    def test_static_config_enabled_without_path_warns(self):
+        self.assertEqual(len(self._static_config_warnings({"enable_static_config": True})), 1)
+        self.assertEqual(len(self._static_config_warnings(
+            {"enable_static_config": True, "static_config_filepath": ""})), 1)
+        # A non-string value also trips the generic type check, so expect at least one.
+        self.assertGreaterEqual(len(self._static_config_warnings(
+            {"enable_static_config": True, "static_config_filepath": 5})), 1)
+
+    def test_static_config_valid_or_disabled_does_not_warn(self):
+        self.assertEqual(self._static_config_warnings(
+            {"enable_static_config": True, "static_config_filepath": "/etc/cufile-static-config.json"}), [])
+        self.assertEqual(self._static_config_warnings({"enable_static_config": False}), [])
 
     def test_static_routing_empty_file_warns(self):
         old_loader = cufile_config._load_cufile_json_with_path

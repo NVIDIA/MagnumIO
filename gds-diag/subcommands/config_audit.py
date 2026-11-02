@@ -97,10 +97,10 @@ def _run_text(args: argparse.Namespace) -> int:
                 else "unavailable; used built-in defaults"
             )
         print(f"  gdscheck note : {fallback_note}")
-    if audit.get("requested_config_path"):
-        print(f"  Requested   : {audit['requested_config_path']}")
+    if audit.get("requested_config_path") and audit["requested_config_path"] != audit.get("config_path"):
+        print(f"  Requested     : {audit['requested_config_path']}")
     if audit.get("env_config_path"):
-        print(f"  Env path    : {audit['env_config_path']}")
+        print(f"  Env path      : {audit['env_config_path']}")
     if not audit.get("env_overrides_applied", True):
         print("  Env values  : ignored")
     if audit.get("profile"):
@@ -158,7 +158,7 @@ def _run_text(args: argparse.Namespace) -> int:
         print("  " + (", ".join(_parts) if _parts else "No entries checked."))
         print()
 
-    return 1 if any(e["status"] == "WARN" for e in entries) else 0
+    return 1 if any(e["status"] == "FAIL" for e in entries) else 0
 
 
 def _run_json(args: argparse.Namespace) -> int:
@@ -176,7 +176,7 @@ def _run_json(args: argparse.Namespace) -> int:
     print(json.dumps(audit, indent=2))
     if audit.get("parse_error"):
         return 1
-    return 1 if any(e["status"] == "WARN" for e in audit["entries"]) else 0
+    return 1 if any(e["status"] == "FAIL" for e in audit["entries"]) else 0
 
 
 class ConfigAuditCommand(Subcommand):
