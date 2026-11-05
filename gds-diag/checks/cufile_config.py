@@ -126,6 +126,8 @@ CONFIG_SCHEMA: list[dict[str, Any]] = [
     {"path": "miscellaneous.stream_memops_bypass", "default": False, "scope": "misc", "type": "bool", "profiles": ["all"], "description": "Bypass stream memory operations where supported."},
     {"path": "miscellaneous.enable_static_routing", "aliases": ["sparse.enable_static_routing"], "default": False, "scope": "misc", "type": "bool", "profiles": ["local-nvme", "nvmeof"], "description": "Enable static topology routing using a user-supplied topology.json file."},
     {"path": "miscellaneous.static_routing_filepath", "aliases": ["sparse.static_routing_filepath"], "default": "/etc/topology.json", "scope": "misc", "type": "string", "profiles": ["local-nvme", "nvmeof"], "description": "Path to the static topology JSON consumed when static routing is enabled."},
+    {"path": "miscellaneous.enable_static_config", "default": False, "scope": "misc", "type": "bool", "profiles": ["all"], "description": "Enable reading per-GPU hardware config (BAR size, p2pdma) from a user-supplied JSON file."},
+    {"path": "miscellaneous.static_config_filepath", "default": "", "scope": "misc", "type": "string", "profiles": ["all"], "description": "Path to the static hardware config JSON consumed when static config is enabled."},
     {"path": "miscellaneous.rdma_token_reset_timeout_secs", "default": 30, "scope": "misc", "type": "int", "profiles": ["all"], "description": "Timeout in seconds for RDMA token reset handling."},
     {"path": "execution.max_io_queue_depth", "default": 128, "scope": "execution", "type": "int", "profiles": ["all"], "description": "Maximum pending work items in cuFile threadpool."},
     {"path": "execution.max_io_threads", "default": 4, "scope": "execution", "type": "int", "profiles": ["all"], "description": "Threadpool threads per GPU."},
@@ -163,6 +165,17 @@ _IGNORED_UNKNOWN_CONFIG_PATHS = {
     "properties.rdma_health_check_interval_ms",
     "properties.rdma_async_event_monitoring",
     "properties.rdma_unhealthy_threshold",
+    "properties.rdma_service_level",
+    # Present in the GDS library parser but not yet given validation rules here.
+    "properties.allow_system_memory",
+    "logging.max_file_size_mb",
+    "denylist.fsids",
+    "miscellaneous.rcu_library_used",
+    "fs.panfs.mount_table",
+    "fs.panfs.rdma_dev_addr_list",
+    "fs.panfs.use_pci_p2pdma",
+    "fs.scatefs.mount_table",
+    "fs.scatefs.rdma_dev_addr_list",
 }
 _GPU_BOUNCE_SLAB_LEAF_PATHS = {
     "properties.gpu_bounce_buffer_slab_config.slab_size_kb",
@@ -435,7 +448,7 @@ def _iter_leaf_paths(value: Any, prefix: str = ""):
 
 
 def _is_mount_table_leaf(path: str) -> bool:
-    for fs_name in ("beegfs", "gpfs", "lustre", "nfs", "weka"):
+    for fs_name in ("beegfs", "gpfs", "lustre", "nfs", "panfs", "scatefs", "weka"):
         if path.startswith(f"fs.{fs_name}.mount_table."):
             return True
     return False
@@ -693,7 +706,7 @@ def _append_cross_field_entries(config: Optional[dict], entries: list[dict[str, 
         ))
 
     fs_cfg = config.get("fs", {}) if isinstance(config.get("fs"), dict) else {}
-    for fs_name in ("beegfs", "gpfs", "lustre", "nfs", "weka"):
+    for fs_name in ("beegfs", "gpfs", "lustre", "nfs", "panfs", "scatefs", "weka"):
         section = fs_cfg.get(fs_name, {})
         if not isinstance(section, dict):
             continue
@@ -785,6 +798,17 @@ def _append_cross_field_entries(config: Optional[dict], entries: list[dict[str, 
                     f"Create a readable, non-empty topology JSON file at the configured path or disable {static_routing_enable_name}.",
                     filepath,
                 ))
+
+    if misc.get("enable_static_config") is True:
+        config_filepath = misc.get("static_config_filepath")
+        if not isinstance(config_filepath, str) or not config_filepath.strip():
+            entries.append(_make_synthetic_entry(
+                "miscellaneous.static_config_filepath",
+                "WARN",
+                "Static config is enabled without a valid config file path",
+                "Set miscellaneous.static_config_filepath to the static config JSON path, for example /etc/cufile-static-config.json, or disable miscellaneous.enable_static_config.",
+                config_filepath,
+            ))
 
 
 def _get_dotted(config: Optional[dict], dotted: str) -> tuple[bool, Any]:

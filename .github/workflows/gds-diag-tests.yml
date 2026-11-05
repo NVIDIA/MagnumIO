@@ -20,11 +20,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.11", "3.13"]
         include:
-          # README documents Python 3.8+; setup-python needs an older runner image for 3.8.
+          # README documents Python 3.8+; setup-python has no 3.8/3.9 builds for
+          # the newest ubuntu-latest image, so use an older runner for those.
           - os: ubuntu-22.04
             python-version: "3.8"
+          - os: ubuntu-22.04
+            python-version: "3.9"
     defaults:
       run:
         working-directory: gds-diag

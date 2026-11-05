@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `config-audit`: warn when `miscellaneous.enable_static_config` is true but
+  `miscellaneous.static_config_filepath` is missing or not a non-empty string.
 - `mount-check`: detect device-mapper-backed mounts (LVM, dm-crypt,
   dm-multipath, dm-raid, or generic device-mapper) and flag them as
   unsupported for native GDS (nvidia-fs) and P2PDMA/C2C, since GDS resolves a
