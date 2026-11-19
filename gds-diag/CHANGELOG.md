@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `mount-check`: redundant gdscheck-derived P2PDMA/C2C cufile.json and RAID
   findings that repeated the static checks.
 
+### Fixed
+- `config-audit`: import `subprocess` in `checks/cufile_config.py` so the
+  `nvidia-smi` GPU memory lookup works and the pinned-memory cap INFO can be
+  reported.
+
 ## [1.0.0] - Initial release
 
 Initial version of gds-diag with the following core capabilities implemented as subcommands:
