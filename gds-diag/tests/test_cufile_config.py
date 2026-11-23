@@ -593,6 +593,14 @@ CUFILE CONFIGURATION:
         self.assertEqual(by_path["properties.max_device_pinned_mem_size_kb"]["status"], "INFO")
         self.assertIn("below available GPU memory", by_path["properties.max_device_pinned_mem_size_kb"]["risk"])
 
+    def test_gpu_memory_totals_read_nvidia_smi_output(self):
+        completed = mock.Mock(returncode=0, stdout="81559\n40960\n")
+        with mock.patch("subprocess.run", return_value=completed) as run:
+            totals = cufile_config._gpu_memory_totals_kb()
+
+        run.assert_called_once()
+        self.assertEqual(totals, [81559 * 1024, 40960 * 1024])
+
     def test_threadpool_disabled_settings_warn(self):
         old_loader = cufile_config._load_cufile_json_with_path
         try:

@@ -18,6 +18,7 @@ import copy
 import json
 import os
 import re
+import subprocess
 from typing import Any, Optional
 
 from .result import CheckResult, GDSMode, Status
