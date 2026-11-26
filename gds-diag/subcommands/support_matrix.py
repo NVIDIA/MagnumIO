@@ -221,11 +221,17 @@ def _can_fallback_without_gdscheck(payload: dict, libcufile_info: Optional[dict]
     return bool(payload.get("cuda_toolkit_found") and libcufile_info and libcufile_info.get("found"))
 
 
-def _fallback_note(payload: dict, reason: str) -> str:
+def _fallback_note(payload: dict, reason: str, gdscheck_found: bool = False) -> str:
+    if gdscheck_found:
+        tail = "Live driver/client mode tokens are unavailable until gdscheck -p runs successfully."
+    else:
+        tail = (
+            "Live driver/client mode tokens are unavailable until matching "
+            "gds-tools provides gdscheck."
+        )
     return (
         f"{reason}; falling back to the documentation matrix with detected "
-        "libcufile/GDS version gating. Live driver/client mode tokens are "
-        "unavailable until matching gds-tools provides gdscheck."
+        f"libcufile/GDS version gating. {tail}"
     )
 
 
@@ -480,6 +486,7 @@ def _run_text(args: argparse.Namespace) -> int:
     gdscheck_output: Optional[str] = None
     libcufile_info: Optional[dict] = None
     gdscheck_fallback_note: Optional[str] = None
+    gdscheck_run_error: Optional[str] = None
 
     if want_live:
         gdscheck_path = _find_gdscheck()
@@ -502,6 +509,7 @@ def _run_text(args: argparse.Namespace) -> int:
                 gdscheck_fallback_note = _fallback_note(
                     payload,
                     reason,
+                    gdscheck_found=True,
                 )
             else:
                 gdscheck_output = raw
@@ -511,11 +519,15 @@ def _run_text(args: argparse.Namespace) -> int:
         # auto-detect: show live if gdscheck is available
         gdscheck_path = _find_gdscheck()
         if gdscheck_path:
-            raw, _ = _run_gdscheck_raw(gdscheck_path, required_section="DRIVER CONFIGURATION")
+            raw, auto_error = _run_gdscheck_raw(gdscheck_path, required_section="DRIVER CONFIGURATION")
             if raw:
                 gdscheck_output = raw
                 driver_config = _parse_driver_config(raw)
                 live_available = True
+            else:
+                # gdscheck exists but could not produce live data.  Record why
+                # instead of reporting it as "not found".
+                gdscheck_run_error = auto_error or "gdscheck did not return DRIVER CONFIGURATION output"
 
     if not want_static:
         libcufile_info = cufile_version.detect_libcufile(gdscheck_output)
@@ -533,6 +545,8 @@ def _run_text(args: argparse.Namespace) -> int:
         title += f"  [live — {gdscheck_path}]"
     elif gdscheck_fallback_note:
         title += "  [fallback — gdscheck unavailable]"
+    elif gdscheck_run_error:
+        title += "  [static — gdscheck failed]"
     elif not want_static:
         title += "  [static — gdscheck not found]"
     print()
@@ -543,6 +557,8 @@ def _run_text(args: argparse.Namespace) -> int:
         print(f"  libcufile: {_libcufile_summary(libcufile_info)}")
     if gdscheck_fallback_note:
         print(f"  note: {gdscheck_fallback_note}")
+    elif gdscheck_run_error:
+        print(f"  note: {gdscheck_path} could not provide live data: {gdscheck_run_error}")
     print("─" * SEP_WIDTH)
     print(
         f"  {'Storage route':<{NAME_COL}} {'Native (nvidia-fs)':<20} "
@@ -644,6 +660,7 @@ def _run_json(args: argparse.Namespace) -> int:
     gdscheck_output: Optional[str] = None
     libcufile_info: Optional[dict] = None
     gdscheck_fallback_note: Optional[str] = None
+    gdscheck_run_error: Optional[str] = None
     gdscheck_missing_payload: Optional[dict] = None
 
     if want_live:
@@ -659,19 +676,19 @@ def _run_json(args: argparse.Namespace) -> int:
         if gdscheck_path:
             raw, gdscheck_error = _run_gdscheck_raw(gdscheck_path, required_section="DRIVER CONFIGURATION")
             if not raw:
-                gdscheck_missing_payload = _gdscheck_missing_payload()
+                # gdscheck exists but failed: do not populate gdscheck_missing.
+                payload = _gdscheck_missing_payload()
                 libcufile_info = libcufile_info or cufile_version.detect_libcufile(None)
-                if not _can_fallback_without_gdscheck(gdscheck_missing_payload, libcufile_info):
+                gdscheck_run_error = gdscheck_error or "gdscheck did not return DRIVER CONFIGURATION output"
+                if not _can_fallback_without_gdscheck(payload, libcufile_info):
                     print(json.dumps({
                         "tool": tool_metadata(),
                         "error": "gdscheck_no_output",
                         "gdscheck_detail": gdscheck_error,
+                        "gdscheck_error": gdscheck_run_error,
                     }, indent=2))
                     return 3
-                gdscheck_fallback_note = _fallback_note(
-                    gdscheck_missing_payload,
-                    gdscheck_error or "gdscheck did not return DRIVER CONFIGURATION output",
-                )
+                gdscheck_fallback_note = _fallback_note(payload, gdscheck_run_error, gdscheck_found=True)
             else:
                 gdscheck_output = raw
                 driver_config = _parse_driver_config(raw)
@@ -679,11 +696,15 @@ def _run_json(args: argparse.Namespace) -> int:
     elif not want_static:
         gdscheck_path = _find_gdscheck()
         if gdscheck_path:
-            raw, _ = _run_gdscheck_raw(gdscheck_path, required_section="DRIVER CONFIGURATION")
+            raw, auto_error = _run_gdscheck_raw(gdscheck_path, required_section="DRIVER CONFIGURATION")
             if raw:
                 gdscheck_output = raw
                 driver_config = _parse_driver_config(raw)
                 live_available = True
+            else:
+                # gdscheck exists but could not produce live data.  Record why
+                # instead of reporting it as "not found".
+                gdscheck_run_error = auto_error or "gdscheck did not return DRIVER CONFIGURATION output"
 
     if not want_static:
         libcufile_info = cufile_version.detect_libcufile(gdscheck_output)
@@ -759,6 +780,7 @@ def _run_json(args: argparse.Namespace) -> int:
         "gdscheck_path": gdscheck_path,
         "gdscheck_fallback": bool(gdscheck_fallback_note),
         "gdscheck_fallback_note": gdscheck_fallback_note,
+        "gdscheck_error": gdscheck_run_error,
         "gdscheck_missing": gdscheck_missing_payload,
         "libcufile": libcufile_info,
         "filesystems": filesystems,

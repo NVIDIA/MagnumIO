@@ -17,6 +17,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shlex
 import re
 import subprocess
 from typing import Any, Optional
@@ -230,6 +231,24 @@ def _strip_jsonc_comments(text: str) -> str:
     return ''.join(result)
 
 
+def _unreadable_mitigation(path: Optional[str]) -> str:
+    return (
+        "Re-run as a user that can read the file (for example with sudo), or check its "
+        f"permissions: ls -l {shlex.quote(path or CUFILE_JSON_PATH)}\n"
+        "Note that cuFile applications running as a non-root user need to read this file too."
+    )
+
+
+def _cufile_json_error_text(config: dict, parse_why: str, parse_fix: str) -> tuple[str, str]:
+    """(why, mitigation) for a cufile.json load error: unreadable vs. unparseable."""
+    if config.get("_unreadable"):
+        return (
+            f"cufile.json could not be read: {config['_parse_error']}",
+            _unreadable_mitigation(config.get("_path")),
+        )
+    return parse_why, parse_fix
+
+
 def _load_cufile_json_with_path() -> tuple[Optional[dict], Optional[str]]:
     """
     Load and parse /etc/cufile.json. NVIDIA ships this file as JSONC
@@ -253,6 +272,17 @@ def _load_cufile_json_with_path() -> tuple[Optional[dict], Optional[str]]:
             return {"_parse_error": "top-level cufile.json value must be an object", "_path": path}, path
         except FileNotFoundError:
             continue
+        except OSError as exc:
+            # Typically PermissionError (e.g. a root-only /etc/cufile.json read
+            # as a normal user).  Stop here instead of falling through to the
+            # next candidate: silently auditing a different file would report
+            # settings that cuFile is not actually using.
+            reason = exc.strerror or str(exc)
+            return {
+                "_parse_error": f"cannot read {path}: {reason}",
+                "_unreadable": True,
+                "_path": path,
+            }, path
         except json.JSONDecodeError as exc:
             return {"_parse_error": str(exc), "_path": path}, path
     return None, None
@@ -1372,10 +1402,14 @@ def check_allow_compat_mode(config: Optional[dict]) -> CheckResult:
         )
 
     if "_parse_error" in config:
+        why, mitigation = _cufile_json_error_text(
+            config,
+            "cufile.json has a parse error — cannot verify allow_compat_mode setting.",
+            f"Fix the JSON parse error in {config.get('_path') or CUFILE_JSON_PATH}.",
+        )
         return CheckResult(
             check="Compat mode availability", mode=GDSMode.COMPAT, status=Status.WARN,
-            why="cufile.json has a parse error — cannot verify allow_compat_mode setting.",
-            mitigation="Fix the JSON parse error in /etc/cufile.json.",
+            why=why, mitigation=mitigation,
         )
 
     props = config.get("properties", {})
@@ -1617,10 +1651,14 @@ def run_all(
             ),
         ))
     elif "_parse_error" in config:
+        why, mitigation = _cufile_json_error_text(
+            config,
+            f"cufile.json at {config.get('_path')} has a JSON parse error: {config['_parse_error']}",
+            f"Validate the file: python3 -m json.tool {shlex.quote(config.get('_path') or CUFILE_JSON_PATH)}",
+        )
         results.append(CheckResult(
             check="cufile.json", mode=GDSMode.NATIVE, status=Status.FAIL,
-            why=f"cufile.json at {config.get('_path')} has a JSON parse error: {config['_parse_error']}",
-            mitigation="Validate the file: python3 -m json.tool /etc/cufile.json",
+            why=why, mitigation=mitigation,
         ))
         return results
 

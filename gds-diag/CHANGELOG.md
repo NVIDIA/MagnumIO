@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   mount to a raw NVMe (or supported RAID0) block device and cannot see
   through device-mapper's block remapping.
 
+### Fixed
+- An unreadable `cufile.json` (e.g. a root-only `/etc/cufile.json` read as a
+  normal user) is reported as "could not be read" instead of crashing
+  `post-install` with a `PermissionError`, and is no longer silently replaced
+  by the next candidate path.
+- `support-matrix`: when `gdscheck` is installed but fails (e.g. permission
+  denied), report `[static — gdscheck failed]` with the reason instead of
+  "gdscheck not found". JSON output gains `gdscheck_error`.
+
 ### Removed
 - `mount-check`: redundant gdscheck-derived P2PDMA/C2C cufile.json and RAID
   findings that repeated the static checks.
