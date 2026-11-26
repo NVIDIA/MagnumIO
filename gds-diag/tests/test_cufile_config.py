@@ -1248,5 +1248,99 @@ class EffectiveConfigTests(unittest.TestCase):
         self.assertNotIn("CUFILE_FORCE_COMPAT_MODE env var", results)
 
 
+class UnreadableCufileJsonTests(unittest.TestCase):
+    """A cufile.json the current user cannot read must not crash the checks."""
+
+    def setUp(self):
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CUFILE_ENV_PATH_JSON", None)
+
+    def _denied_open(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", "/etc/cufile.json")
+
+    def test_loader_reports_unreadable_file_instead_of_raising(self):
+        with mock.patch.object(cufile_config, "CUFILE_JSON_PATH", "/etc/cufile.json"), \
+                mock.patch("builtins.open", side_effect=self._denied_open):
+            config, path = cufile_config._load_cufile_json_with_path()
+
+        self.assertEqual(path, "/etc/cufile.json")
+        self.assertIn("_parse_error", config)
+        self.assertTrue(config.get("_unreadable"))
+        self.assertIn("Permission denied", config["_parse_error"])
+
+    def test_loader_does_not_fall_through_to_a_different_file(self):
+        opened = []
+
+        def fake_open(path, *args, **kwargs):
+            opened.append(path)
+            raise PermissionError(13, "Permission denied", path)
+
+        with mock.patch.object(cufile_config, "CUFILE_JSON_PATH", "/etc/cufile.json"), \
+                mock.patch("builtins.open", side_effect=fake_open):
+            cufile_config._load_cufile_json_with_path()
+
+        self.assertEqual(opened, ["/etc/cufile.json"])
+
+    def test_audit_config_survives_unreadable_file(self):
+        # gdscheck unavailable: the unreadable file is the config source.
+        with mock.patch.object(cufile_config, "CUFILE_JSON_PATH", "/etc/cufile.json"), \
+                mock.patch.object(cufile_config, "_load_cufile_config_from_gdscheck",
+                                  return_value=(None, None, "test: gdscheck disabled")), \
+                mock.patch("builtins.open", side_effect=self._denied_open):
+            audit = cufile_config.audit_config(apply_env=False)
+        self.assertIn("Permission denied", audit["parse_error"])
+
+        # gdscheck works: the unreadable file is only the fallback and is reported as such.
+        with mock.patch.object(cufile_config, "CUFILE_JSON_PATH", "/etc/cufile.json"), \
+                mock.patch.object(cufile_config, "_load_cufile_config_from_gdscheck",
+                                  return_value=({"properties": {}}, "/usr/local/cuda/gds/tools/gdscheck", None)), \
+                mock.patch("builtins.open", side_effect=self._denied_open):
+            audit = cufile_config.audit_config(apply_env=False)
+        self.assertIn("Permission denied", audit["file_fallback_error"])
+
+    def test_checks_report_unreadable_file_not_parse_error(self):
+        unreadable = {
+            "_parse_error": "cannot read /etc/cufile.json: Permission denied",
+            "_unreadable": True,
+            "_path": "/etc/cufile.json",
+        }
+        compat = cufile_config.check_allow_compat_mode(unreadable)
+        self.assertIn("could not be read", compat.why)
+        self.assertNotIn("parse error", compat.why)
+        self.assertIn("ls -l /etc/cufile.json", compat.mitigation)
+
+    def test_parse_error_mitigations_name_the_failing_path(self):
+        broken = {"_parse_error": "Expecting value: line 1 column 1", "_path": "/opt/my cufile.json"}
+
+        compat = cufile_config.check_allow_compat_mode(broken)
+        with mock.patch.object(cufile_config, "_load_cufile_json", return_value=broken):
+            failing = [r for r in cufile_config.run_all("wekafs") if r.check == "cufile.json"]
+
+        self.assertIn("/opt/my cufile.json", compat.mitigation)
+        self.assertIn("json.tool '/opt/my cufile.json'", failing[0].mitigation)
+        for text in (compat.mitigation, failing[0].mitigation):
+            self.assertNotIn("/etc/cufile.json", text)
+
+    def test_mitigation_names_the_unreadable_path_not_etc_cufile_json(self):
+        unreadable = {
+            "_parse_error": "cannot read /opt/my cufile.json: Permission denied",
+            "_unreadable": True,
+            "_path": "/opt/my cufile.json",
+        }
+        compat = cufile_config.check_allow_compat_mode(unreadable)
+
+        self.assertIn("ls -l '/opt/my cufile.json'", compat.mitigation)
+        self.assertNotIn("/etc/cufile.json", compat.mitigation)
+
+        with mock.patch.object(cufile_config, "_load_cufile_json", return_value=unreadable):
+            results = cufile_config.run_all("wekafs")
+        failing = [r for r in results if r.check == "cufile.json"]
+        self.assertEqual(len(failing), 1)
+        self.assertIn("could not be read", failing[0].why)
+        self.assertNotIn("JSON parse error", failing[0].why)
+
+
 if __name__ == "__main__":
     unittest.main()

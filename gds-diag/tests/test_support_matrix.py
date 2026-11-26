@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 from contextlib import redirect_stdout
+from unittest import mock
 
 from checks.fs_matrix import FS_CAPABILITIES
 from subcommands import support_matrix
@@ -442,6 +443,89 @@ DRIVER CONFIGURATION:
 
         self.assertNotIn("probe failed", summary)
         self.assertIn("API 1.16", summary)
+
+
+class GdscheckFailureReportingTests(unittest.TestCase):
+    """gdscheck present but failing (e.g. permission denied) is not "not found"."""
+
+    DENIED = "gdscheck -p exited with 255: Permission denied"
+    LIBCUFILE = {
+        "found": True,
+        "api_version": "1.18",
+        "api_version_tuple": [1, 18],
+        "file_version": "1.18.1",
+        "path": "/usr/local/cuda/lib64/libcufile.so",
+    }
+
+    def _run(self, runner, **flags):
+        flags.setdefault("live", False)
+        args = argparse.Namespace(static=False, json=False, verbose=False, **flags)
+        output = io.StringIO()
+        with mock.patch.object(support_matrix, "_find_gdscheck", return_value="/usr/local/cuda/gds/tools/gdscheck"), \
+                mock.patch.object(support_matrix, "_run_gdscheck_raw", return_value=(None, self.DENIED)), \
+                mock.patch.object(support_matrix, "_detect_cuda_toolkit", return_value={"found": True, "evidence": "/usr/local/cuda"}), \
+                mock.patch.object(support_matrix, "_detect_gds_packages", return_value=[]), \
+                mock.patch.object(support_matrix.cufile_version, "detect_libcufile", return_value=dict(self.LIBCUFILE)), \
+                redirect_stdout(output):
+            code = runner(args)
+        return code, output.getvalue()
+
+    def test_auto_mode_text_says_gdscheck_failed_not_missing(self):
+        code, text = self._run(support_matrix._run_text)
+
+        self.assertEqual(code, 0)
+        self.assertIn("[static — gdscheck failed]", text)
+        self.assertNotIn("gdscheck not found", text)
+        self.assertIn("Permission denied", text)
+
+    def test_auto_mode_json_reports_gdscheck_error(self):
+        code, text = self._run(support_matrix._run_json)
+
+        self.assertEqual(code, 0)
+        payload = json.loads(text)
+        self.assertFalse(payload["live_status_available"])
+        self.assertEqual(payload["gdscheck_path"], "/usr/local/cuda/gds/tools/gdscheck")
+        self.assertEqual(payload["gdscheck_error"], self.DENIED)
+        self.assertIsNone(payload["gdscheck_missing"])
+
+    def test_live_json_failure_fallback_keeps_error_without_missing_payload(self):
+        code, text = self._run(support_matrix._run_json, live=True)
+
+        payload = json.loads(text)
+        self.assertEqual(code, 0)
+        self.assertTrue(payload["gdscheck_fallback"])
+        self.assertEqual(payload["gdscheck_error"], self.DENIED)
+        self.assertIsNone(payload["gdscheck_missing"])
+
+    def test_live_fallback_note_does_not_blame_missing_gds_tools(self):
+        code, text = self._run(support_matrix._run_text, live=True)
+
+        self.assertEqual(code, 0)
+        self.assertIn("[fallback — gdscheck unavailable]", text)
+        self.assertNotIn("until matching gds-tools provides gdscheck", text)
+        self.assertIn("until gdscheck -p runs successfully", text)
+
+    def test_live_json_error_without_libcufile_still_reports_gdscheck_error(self):
+        args = argparse.Namespace(live=True, static=False, json=True, verbose=False)
+        output = io.StringIO()
+        with mock.patch.object(support_matrix, "_find_gdscheck", return_value="/usr/local/cuda/gds/tools/gdscheck"), \
+                mock.patch.object(support_matrix, "_run_gdscheck_raw", return_value=(None, self.DENIED)), \
+                mock.patch.object(support_matrix, "_detect_cuda_toolkit", return_value={"found": False, "evidence": None}), \
+                mock.patch.object(support_matrix, "_detect_gds_packages", return_value=[]), \
+                mock.patch.object(support_matrix.cufile_version, "detect_libcufile", return_value={"found": False}), \
+                redirect_stdout(output):
+            code = support_matrix._run_json(args)
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(code, 3)
+        self.assertEqual(payload["error"], "gdscheck_no_output")
+        self.assertEqual(payload["gdscheck_detail"], self.DENIED)
+        self.assertEqual(payload["gdscheck_error"], self.DENIED)
+
+    def test_live_missing_gdscheck_note_keeps_install_wording(self):
+        note = support_matrix._fallback_note({}, "gdscheck was not found")
+
+        self.assertIn("until matching gds-tools provides gdscheck", note)
 
 
 if __name__ == "__main__":
