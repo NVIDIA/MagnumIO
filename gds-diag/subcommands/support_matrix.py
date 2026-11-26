@@ -79,7 +79,9 @@ _FS_DISPLAY_ALIASES: dict[str, list[str]] = {
 
 # Maps lowercase gdscheck DRIVER CONFIGURATION key → our fs_type(s)
 _DRIVER_KEY_TO_FS: dict[str, list[str]] = {
-    "nvme":               ["ext4", "xfs"],
+    # RAID0 over NVMe uses the same nvidia-fs path as plain NVMe, so its
+    # Native/Compat verdict follows the NVMe token.  gdscheck has no RAID0 row.
+    "nvme":               ["ext4", "xfs", "raid0"],
     "nvmeof":             ["nvme-of"],
     "scsi":               ["scsi"],
     "scaleflux csd":      ["scaleflux"],
@@ -286,6 +288,10 @@ def _live_native_from_modes(modes: str, supports_userspace_rdma: bool) -> bool:
 
 
 def _live_p2pdma_from_modes(fs: str, modes: str, driver_config: dict[str, str]) -> bool:
+    if fs == "raid0":
+        # RAID P2PDMA/C2C is toggled separately (block.raid.use_pci_p2pdma), so
+        # the NVMe token does not confirm it; keep the documented Config label.
+        return False
     if driver_config_has_direct_p2pdma_token(modes):
         return True
     if fs in {"ext4", "xfs"}:

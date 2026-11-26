@@ -65,6 +65,29 @@ DRIVER CONFIGURATION:
         )
         self.assertTrue(support_matrix._live_native_from_modes(driver_config["nvme"], False))
 
+    def test_raid0_native_follows_nvme_token(self):
+        for nvme_line, expected in (("c2c, nvfs, compat", True), ("compat", False)):
+            driver_config = support_matrix._parse_driver_config(
+                f"=====================\nDRIVER CONFIGURATION:\n=====================\n  NVMe : {nvme_line}\n"
+            )
+            live_map = support_matrix._live_status_map(driver_config)
+
+            for fs in ("ext4", "xfs", "raid0"):
+                self.assertEqual(
+                    support_matrix._live_native_from_modes(live_map[fs], False), expected, (fs, nvme_line)
+                )
+
+    def test_raid0_is_unknown_when_nvme_row_missing(self):
+        live_map = support_matrix._live_status_map({})
+
+        self.assertIsNone(live_map["raid0"])
+
+    def test_nvme_p2pdma_token_does_not_confirm_raid0_p2pdma(self):
+        driver_config = {"nvme": "c2c, nvfs, compat"}
+
+        self.assertTrue(support_matrix._live_p2pdma_from_modes("ext4", driver_config["nvme"], driver_config))
+        self.assertFalse(support_matrix._live_p2pdma_from_modes("raid0", driver_config["nvme"], driver_config))
+
     def test_live_p2pdma_token_does_not_override_unsupported_filesystem(self):
         value = support_matrix._p2pdma_ref_value("gpfs", FS_CAPABILITIES["gpfs"], live_p2pdma=True)
 
